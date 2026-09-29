@@ -1,7 +1,9 @@
 // functions/src/lib/telegram.ts
+import { getSecret } from './secrets';
+
 export async function sendTelegramMessage(message: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const token = await getSecret('telegram_token');
+  const chatId = process.env.TELEGRAM_CHAT_ID || await getSecret('telegram_chat_id');
   if (!token || !chatId) {
     console.warn('Telegram credentials not set – skipping notification');
     return;

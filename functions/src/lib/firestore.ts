@@ -1,14 +1,9 @@
 // functions/src/lib/firestore.ts
 import * as admin from 'firebase-admin';
-import { ServiceAccount } from 'firebase-admin';
 
-// Initialize Firebase Admin SDK using a service‑account JSON stored in an env var.
-const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT;
-if (!serviceAccountJson) {
-  throw new Error('FIREBASE_SERVICE_ACCOUNT env var is missing');
-}
-const serviceAccount = JSON.parse(serviceAccountJson) as ServiceAccount;
-admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
+
+// Initialize Firebase Admin SDK with default credentials
+admin.initializeApp();
 
 export const db = admin.firestore();
 

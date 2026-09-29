@@ -1,0 +1,24 @@
+// functions/src/lib/rpcProvider.ts
+import * as functions from 'firebase-functions';
+import { ethers } from 'ethers';
+
+const getBscConfig = () => functions.config().bsc || {};
+const getHttpUrl = () => getBscConfig().http_rpc_url || process.env.BSC_HTTP_RPC_URL || '';
+const getWsUrl = () => getBscConfig().ws_rpc_url || process.env.BSC_WS_RPC_URL || '';
+const getChainId = () => Number(getBscConfig().chain_id || process.env.BSC_CHAIN_ID || 56);
+
+let _httpProvider: ethers.JsonRpcProvider | null = null;
+export const getHttpProvider = () => {
+  if (!_httpProvider) {
+    _httpProvider = new ethers.JsonRpcProvider(getHttpUrl(), getChainId());
+  }
+  return _httpProvider;
+};
+
+let _wsProvider: ethers.WebSocketProvider | null = null;
+export const getWsProvider = () => {
+  if (!_wsProvider) {
+    _wsProvider = new ethers.WebSocketProvider(getWsUrl(), getChainId());
+  }
+  return _wsProvider;
+};

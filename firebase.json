@@ -6,7 +6,7 @@
     "rules": "firestore.rules"
   },
   "hosting": {
-    "public": "src/client",
-    "ignore": ["firebase.json", "**/.*"]
+    "public": "dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"]
   }
 }
