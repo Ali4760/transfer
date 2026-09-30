@@ -7,9 +7,16 @@ import { sendTelegramMessage } from '../lib/telegram';
  * HTTP endpoint to sponsor a wallet address.
  * Mirrors the logic from src/worker/sponsor.ts but stores state in Firestore.
  */
-export const sponsor = functions.https.onRequest(async (req, res) => {
+export const sponsor = functions.runWith({ secrets: ["TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"] }).https.onRequest(async (req, res) => {
   // CORS
   res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;

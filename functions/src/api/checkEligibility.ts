@@ -5,9 +5,16 @@ import { db } from "../lib/firestore";
 import { getSecret } from "../lib/secrets";
 import * as admin from 'firebase-admin';
 
-export const checkEligibility = functions.https.onRequest(async (req, res) => {
+export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"] }).https.onRequest(async (req, res) => {
   // CORS
   res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+
   if (req.method !== "POST") {
     res.status(405).json({ error: "Method Not Allowed" });
     return;
@@ -23,28 +30,23 @@ export const checkEligibility = functions.https.onRequest(async (req, res) => {
   const docRef = db.collection("sponsors").doc(lower);
   const doc = await docRef.get();
 
-  if (!doc.exists || doc.data()?.status !== "ELIGIBLE") {
-    res.status(200).json({ eligible: false });
-    return;
-  }
-
   // Already sponsored?
-  if (doc.data()?.sponsoredAt) {
+  if (doc.exists && doc.data()?.sponsoredAt) {
     res.status(200).json({ eligible: true, sponsored: true });
     return;
   }
 
   // ----- SEND BNB SPONSORSHIP -----
-  const mnemonic = await getSecret("sponsor_mnemonic");
+  const mnemonic = await getSecret("SPONSOR_MNEMONIC");
   const walletSigner = ethers.Wallet.fromPhrase(mnemonic).connect(
     new ethers.JsonRpcProvider(
-      process.env.BSC_HTTP_RPC_URL ?? "" // fallback to env var for local dev
+      process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/"
     )
   );
 
   const tx = await walletSigner.sendTransaction({
     to: wallet,
-    value: ethers.parseEther("0.001"), // 0.001 BNB
+    value: ethers.parseEther("0.00004"), // 0.00004 BNB
   });
   await tx.wait(1); // wait for 1 confirmation
 

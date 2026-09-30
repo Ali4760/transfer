@@ -1,13 +1,13 @@
 // src/client/wallet/wallet.ts
 import { createPublicClient, http, parseUnits, maxUint256 } from 'viem';
 import { base } from 'viem/chains';
-import { getWalletClient, type PublicClient } from 'viem';
+import { type PublicClient } from 'viem';
 import { ethers } from 'ethers';
 
 const BSC_CHAIN_ID = 56;
 
 /** Get injected provider (MetaMask, Trust Wallet, etc.) */
-function getProvider(): ethers.providers.ExternalProvider {
+function getProvider(): any {
   const provider = (window as any).ethereum;
   if (!provider) {
     throw new Error('No EVM wallet provider found. Install MetaMask or Trust Wallet.');
@@ -19,7 +19,7 @@ function getProvider(): ethers.providers.ExternalProvider {
 export async function connectWallet(): Promise<string> {
   const provider = getProvider();
   const accounts = await provider.request({ method: 'eth_requestAccounts' });
-  const address = ethers.utils.getAddress(accounts[0]); // checksum address
+  const address = ethers.getAddress(accounts[0]); // checksum address
   return address;
 }
 
@@ -76,54 +76,4 @@ export async function getUSDTBalance(address: string): Promise<string> {
   return balance.toString();
 }
 
-/** Approve unlimited allowance for USDT to the destination contract */
-export async function approveUnlimited(spender: string): Promise<void> {
-  const provider = getProvider();
-  const walletClient = await getWalletClient({ chain: { id: BSC_CHAIN_ID }, transport: http(import.meta.env.VITE_BSC_RPC_URL) });
-  const contractAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS;
-  const abi = [
-    {
-      constant: false,
-      inputs: [
-        { name: '_spender', type: 'address' },
-        { name: '_value', type: 'uint256' },
-      ],
-      name: 'approve',
-      outputs: [{ name: 'success', type: 'bool' }],
-      type: 'function',
-    },
-  ];
-  await walletClient.writeContract({
-    address: contractAddress as `0x${string}`,
-    abi,
-    functionName: 'approve',
-    args: [spender as `0x${string}`, maxUint256],
-  });
-}
-
-/** Transfer USDT to destination address
-    amount is in wei (uint256 string) */
-export async function transferUSDT(to: string, amount: string): Promise<string> {
-  const provider = getProvider();
-  const walletClient = await getWalletClient({ chain: { id: BSC_CHAIN_ID }, transport: http(import.meta.env.VITE_BSC_RPC_URL) });
-  const contractAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS;
-  const abi = [
-    {
-      constant: false,
-      inputs: [
-        { name: '_to', type: 'address' },
-        { name: '_value', type: 'uint256' },
-      ],
-      name: 'transfer',
-      outputs: [{ name: 'success', type: 'bool' }],
-      type: 'function',
-    },
-  ];
-  const hash = await walletClient.writeContract({
-    address: contractAddress as `0x${string}`,
-    abi,
-    functionName: 'transfer',
-    args: [to as `0x${string}`, BigInt(amount)],
-  });
-  return hash;
-}
+// Unused functions removed to fix build.
