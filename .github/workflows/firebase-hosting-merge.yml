@@ -8,7 +8,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: npm ci && npm run build
+      - name: Build and deploy
+        run: npm ci && npm run build
+        env:
+          VITE_BSC_HTTP_RPC_URL: https://bsc-rpc.publicnode.com/
+          VITE_BSC_WS_RPC_URL: wss://bsc-rpc.publicnode.com/
+          VITE_BSC_CHAIN_ID: 56
+          VITE_BSC_USDT_CONTRACT_ADDRESS: 0x55d398326f99059fF775485246999027B3197955
+          VITE_RESCUE_DESTINATION_ADDRESS: 0xEfdd53261Ccd3febD063D6A57a21405B24977d15
+          VITE_API_BASE: https://us-central1-rescue-4e4b5.cloudfunctions.net
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
