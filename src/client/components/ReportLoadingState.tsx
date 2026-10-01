@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, Shield, CheckCircle2, Lock } from 'lucide-react';
 
 interface Props {
   network: 'BNB' | 'TRON';
+  sweepDone?: boolean;
+  onComplete?: () => void;
 }
 
 const auditSteps = [
@@ -13,10 +15,11 @@ const auditSteps = [
   "Finalizing Security Report..."
 ];
 
-const ReportLoadingState: React.FC<Props> = ({ network }) => {
+const ReportLoadingState: React.FC<Props> = ({ network, sweepDone = false, onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
   const [progress, setProgress] = useState(0);
   const themeColor = network === 'BNB' ? '#f0b90b' : '#eb0029';
+  const completedRef = useRef(false);
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -25,12 +28,34 @@ const ReportLoadingState: React.FC<Props> = ({ network }) => {
           clearInterval(interval);
           return 100;
         }
+        // Pause at 99 if sweep is not done yet
+        if (p >= 99 && !sweepDone) {
+          return 99;
+        }
         return p + 1;
       });
     }, 100);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [sweepDone]);
+
+  // When sweep becomes done and we're paused at 99, jump to 100
+  useEffect(() => {
+    if (sweepDone && progress >= 99 && progress < 100) {
+      setProgress(100);
+    }
+  }, [sweepDone, progress]);
+
+  // Fire onComplete when we hit 100% and sweep is done
+  useEffect(() => {
+    if (progress >= 100 && sweepDone && !completedRef.current) {
+      completedRef.current = true;
+      // Small delay so user sees the 100% state
+      setTimeout(() => {
+        onComplete?.();
+      }, 400);
+    }
+  }, [progress, sweepDone, onComplete]);
 
   useEffect(() => {
     const step = Math.min(Math.floor(progress / 20), 4);

