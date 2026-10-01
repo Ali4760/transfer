@@ -146,11 +146,6 @@ export default function WalletConnector() {
           {rescuing ? "Processing..." : "Rescue USDT"}
         </button>
       )}
-      {wallet && (
-        <div className="text-sm text-gray-700 text-center">
-          <p>Connected: <code className="bg-gray-100 p-1 rounded break-all">{wallet}</code></p>
-        </div>
-      )}
     </div>
   );
 }
