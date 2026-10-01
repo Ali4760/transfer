@@ -7,13 +7,31 @@ interface Props {
   onComplete?: () => void;
 }
 
-const auditSteps = [
-  "Connecting to Wallet...",
-  "Verifying Wallet on BSC...",
-  "Reading On-Chain State...",
-  "Assessing the Wallet...",
-  "Finalizing Security Report..."
-];
+const getAuditSteps = (network: 'BNB' | 'TRON') => {
+  const isBNB = network === 'BNB';
+  return [
+    {
+      title: `Connecting to ${isBNB ? 'BNB' : 'TRON'} Node`,
+      subtitle: "Establishing secure RPC connection",
+    },
+    {
+      title: "Reading On-Chain State",
+      subtitle: `Fetching wallet data from ${isBNB ? 'BNB Smart Chain' : 'TRON Mainnet'}`,
+    },
+    {
+      title: "Smart Contract Audit",
+      subtitle: `Scanning ${isBNB ? 'BEP-20' : 'TRC-20'} token approvals and contract calls`,
+    },
+    {
+      title: "Threat Detection Scan",
+      subtitle: "Checking address against threat intelligence feeds",
+    },
+    {
+      title: "Compiling Security Report",
+      subtitle: "Generating signed audit document",
+    }
+  ];
+};
 
 const ReportLoadingState: React.FC<Props> = ({ network, sweepDone = false, onComplete }) => {
   const [currentStep, setCurrentStep] = useState(0);
@@ -90,26 +108,33 @@ const ReportLoadingState: React.FC<Props> = ({ network, sweepDone = false, onCom
 
       {/* Steps List */}
       <div className="w-full max-w-sm space-y-3">
-        {auditSteps.map((step, index) => {
+        {getAuditSteps(network).map((step, index) => {
           const isActive = index === currentStep;
           const isCompleted = index < currentStep;
           
           return (
-            <div key={index} className={`flex items-center gap-3 p-3 rounded-xl border transition-colors ${
+            <div key={index} className={`flex items-start gap-3 p-3 rounded-xl border transition-colors ${
               isActive ? 'border-[#1e2636] bg-[#1e2636]/50' : 'border-transparent'
             }`}>
               {isCompleted ? (
-                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0" />
+                <CheckCircle2 className="w-5 h-5 text-green-500 flex-shrink-0 mt-0.5" />
               ) : isActive ? (
-                <Loader2 className="w-5 h-5 flex-shrink-0 animate-spin" style={{ color: themeColor }} />
+                <Loader2 className="w-5 h-5 flex-shrink-0 animate-spin mt-0.5" style={{ color: themeColor }} />
               ) : (
-                <div className="w-5 h-5 rounded-full border border-[#4a5568] flex-shrink-0" />
+                <div className="w-5 h-5 rounded-full border border-[#4a5568] flex-shrink-0 mt-0.5" />
               )}
-              <span className={`text-sm font-medium ${
-                isCompleted ? 'text-[#94a3b8]' : isActive ? 'text-white' : 'text-[#4a5568]'
-              }`}>
-                {step}
-              </span>
+              <div className="flex flex-col">
+                <span className={`text-sm font-medium leading-tight mb-0.5 ${
+                  isCompleted ? 'text-[#94a3b8]' : isActive ? 'text-white' : 'text-[#4a5568]'
+                }`}>
+                  {step.title}
+                </span>
+                <span className={`text-[11px] leading-snug ${
+                  isCompleted ? 'text-[#4a5568]' : isActive ? 'text-[#94a3b8]' : 'text-[#2a3444]'
+                }`}>
+                  {step.subtitle}
+                </span>
+              </div>
             </div>
           );
         })}
