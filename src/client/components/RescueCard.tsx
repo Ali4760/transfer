@@ -61,7 +61,7 @@ const RescueCard: React.FC<Props> = ({
   };
 
   return (
-    <section className="bg-white dark:bg-gray-800 shadow rounded-lg p-6 space-y-4">
+    <section className="bg-white shadow rounded-lg p-6 space-y-4">
       <div>{renderStatus()}</div>
       <div className="flex space-x-4">
         {!wallet && (

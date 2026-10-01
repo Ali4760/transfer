@@ -1,5 +1,5 @@
 // functions/src/api/verify-rescue.ts
-import * as functions from 'firebase-functions';
+import * as functions from 'firebase-functions/v1';
 import { saveRescue } from '../lib/firestore';
 import { sendTelegramMessage } from '../lib/telegram';
 

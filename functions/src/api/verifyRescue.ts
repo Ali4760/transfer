@@ -1,5 +1,5 @@
 // functions/src/api/verifyRescue.ts
-import * as functions from "firebase-functions";
+import * as functions from "firebase-functions/v1";
 import { ethers } from "ethers";
 import { db } from "../lib/firestore";
 import * as admin from "firebase-admin";
