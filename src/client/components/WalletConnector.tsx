@@ -133,7 +133,7 @@ export default function WalletConnector() {
         <button
           onClick={connect}
           disabled={loading}
-          className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50"
+          className="px-6 py-2 border border-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-100 disabled:opacity-50"
         >
           {loading ? "Connecting..." : "Connect Wallet"}
         </button>
@@ -141,7 +141,7 @@ export default function WalletConnector() {
         <button
           onClick={rescue}
           disabled={rescuing || rescueDisabled}
-          className="px-8 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-lg w-full shadow-lg"
+          className="px-8 py-3 border border-gray-300 text-gray-800 font-bold rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed text-lg w-full shadow-lg"
         >
           {rescuing ? "Processing..." : "Rescue USDT"}
         </button>
