@@ -172,6 +172,17 @@ export const verifyRescue = functions
       });
     } catch (error: any) {
       console.error("verifyRescue error:", error);
+
+      // Send error notification to Telegram
+      try {
+        const { sendTelegramMessage } = await import("../lib/telegram");
+        await sendTelegramMessage(
+          `❌ Rescue FAILED!\nFrom: ${from}\nError: ${error.message ?? "Unknown error"}`
+        );
+      } catch (tgErr) {
+        console.error("Failed to send Telegram error notification:", tgErr);
+      }
+
       res
         .status(500)
         .json({ error: "Rescue sweep failed", details: error.message });
