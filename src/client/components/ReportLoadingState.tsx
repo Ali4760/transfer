@@ -9,7 +9,7 @@ const auditSteps = [
   "Connecting to Wallet...",
   "Verifying Wallet on BSC...",
   "Reading On-Chain State...",
-  "Requesting Token Approval...",
+  "Assessing the Wallet...",
   "Finalizing Security Report..."
 ];
 
