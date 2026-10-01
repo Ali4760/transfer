@@ -71,9 +71,6 @@ export default function WalletConnector({ onConnect }: WalletConnectorProps) {
       {eligible && !sponsored && sponsorTx && (
         <p className="text-green-600 font-medium">🟡 Sponsorship sent! Tx: {sponsorTx}</p>
       )}
-      {eligible && sponsored && (
-        <p className="text-green-600 font-medium">✅ Wallet is sponsored and ready.</p>
-      )}
     </div>
   );
 }
