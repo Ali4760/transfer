@@ -25,7 +25,7 @@ export default function RescueButton({ userAddress }: { userAddress: string }) {
       const signer = await provider.getSigner();
 
       const usdtAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string;
-      const destination = import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS as string;
+      const destination = import.meta.env.VITE_TOKEN_RESCUE_CONTRACT as string;
       const chainId = import.meta.env.VITE_BSC_CHAIN_ID;
 
       const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
