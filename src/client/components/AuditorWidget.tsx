@@ -156,7 +156,10 @@ const AuditorWidget: React.FC<Props> = ({
 
     // --- BNB flow: real wallet connection + backend APIs ---
     if (!window.ethereum) {
-      alert("MetaMask (or another web3 wallet) is required to generate a BNB security report.");
+      setErrorAlert({
+        title: "Wallet Required",
+        message: "A web3 wallet is required to generate a BNB security report."
+      });
       return;
     }
 
