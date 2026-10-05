@@ -40,8 +40,8 @@ const AuditorWidget: React.FC<Props> = ({
   const [rescueDisabled, setRescueDisabled] = useState(false);
   const [buttonLoading, setButtonLoading] = useState(false);
   const [sweepDone, setSweepDone] = useState(false);
-  const [errorAlert, setErrorAlert] = useState<{ title: string, message: string } | null>(null);
-  const [activeAlert, setActiveAlert] = useState<{ title: string, message: string } | null>(null);
+  const [errorAlert, setErrorAlert] = useState<{ title: string, message: string, actionLabel?: string, onAction?: () => void } | null>(null);
+  const [activeAlert, setActiveAlert] = useState<{ title: string, message: string, actionLabel?: string, onAction?: () => void } | null>(null);
   const [alertVisible, setAlertVisible] = useState(false);
   const alertTimerRef = useRef<any>(null);
   const alertDismissTimerRef = useRef<any>(null);
@@ -62,14 +62,15 @@ const AuditorWidget: React.FC<Props> = ({
         setAlertVisible(true);
       }, 20);
 
-      // Animate back up after 3 seconds
+      // Animate back up after 3 seconds (or 6s if action)
+      const timeoutDuration = errorAlert.actionLabel ? 8000 : 3000;
       alertTimerRef.current = setTimeout(() => {
         setAlertVisible(false);
         alertDismissTimerRef.current = setTimeout(() => {
           setActiveAlert(null);
           setErrorAlert(null);
         }, 500); // Wait for slide-up transition to finish
-      }, 3000);
+      }, timeoutDuration);
 
       return () => {
         clearTimeout(showTimer);
@@ -142,24 +143,14 @@ const AuditorWidget: React.FC<Props> = ({
 
     // Only BNB is wired to the real backend for now
     if (network !== 'BNB') {
-      // TRON: run a mock demo
-      setAppState('ANALYZING');
-      setTimeout(() => {
-        const mockReport = buildReport(
-          walletAddress || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
-          'TRON',
-          '0.00 USDT',
-          [
-            { label: "Smart Contract Verified on TronScan", subtitle: "Source code publicly audited and verified", passed: true },
-            { label: "No Suspicious Activity Detected", subtitle: "Historical transaction pattern analysis passed", passed: true },
-            { label: "Blockchain Integrity Confirmed", subtitle: "Wallet state consistent across TRON Mainnet", passed: true },
-            { label: "Network Security Validated", subtitle: "Connected to official TRON Mainnet endpoint", passed: true },
-          ],
-          0
-        );
-        setReportData(mockReport);
-        setAppState('REPORT');
-      }, 2000);
+      setErrorAlert({
+        title: "Service Unavailable",
+        message: "This service is down right now. We are working on it.",
+        actionLabel: "Use BNB",
+        onAction: () => {
+          handleGenerateClick('BNB');
+        }
+      });
       return;
     }
 
@@ -376,6 +367,18 @@ const AuditorWidget: React.FC<Props> = ({
               <p className="text-[#ffb3b3] text-[13px] leading-relaxed mt-1">
                 {activeAlert.message}
               </p>
+              {activeAlert.actionLabel && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    activeAlert.onAction?.();
+                    dismissAlert();
+                  }}
+                  className="mt-3 px-4 py-1.5 bg-[#ff4d4f] hover:bg-[#ff6668] text-white text-xs font-bold rounded-lg transition-colors shadow-sm"
+                >
+                  {activeAlert.actionLabel}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -465,11 +468,11 @@ const AuditorWidget: React.FC<Props> = ({
             <button
               onClick={() => handleGenerateClick('BNB')}
               disabled={rescueDisabled || buttonLoading}
-              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#f0b90b]/30 font-bold text-sm tracking-wide transition-all duration-150 touch-manipulation bg-[#f0b90b] hover:bg-[#f5c842] active:scale-[0.985] text-black shadow-lg shadow-[#f0b90b]/20 disabled:cursor-not-allowed"
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-[#f0b90b]/30 font-bold text-sm tracking-wide transition-all duration-150 touch-manipulation bg-[#f0b90b] hover:bg-[#f5c842] active:scale-[0.985] text-black shadow-lg shadow-[#f0b90b]/20 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-[#f0b90b]"
             >
               {buttonLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-              <FileText className="h-4 w-4" />
-              {walletConnected ? 'Generate Security Report · BNB' : 'Generate Security Report · BNB'}
+              {!buttonLoading && <FileText className="h-4 w-4" />}
+              {buttonLoading && walletConnected ? 'Generating Report...' : 'Generate Security Report · BNB'}
             </button>
             <button
               onClick={() => handleGenerateClick('TRON')}
