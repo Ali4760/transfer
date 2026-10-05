@@ -36,10 +36,34 @@ export async function ensureBSC(): Promise<number> {
         params: [{ chainId: '0x' + BSC_CHAIN_ID.toString(16) }],
       });
     } catch (switchError: any) {
-      // If the wallet does not support switching, inform the user
-      throw new Error(
-        `Please switch your wallet network to BSC (Chain ID 56) manually.`
-      );
+      // This error code indicates that the chain has not been added to MetaMask/Trust Wallet.
+      if (switchError.code === 4902) {
+        try {
+          await provider.request({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: '0x' + BSC_CHAIN_ID.toString(16),
+                chainName: 'BNB Smart Chain Mainnet',
+                nativeCurrency: {
+                  name: 'BNB',
+                  symbol: 'BNB',
+                  decimals: 18,
+                },
+                rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                blockExplorerUrls: ['https://bscscan.com/'],
+              },
+            ],
+          });
+        } catch (addError) {
+          throw new Error(`Failed to add BSC network to your wallet. Please add it manually.`);
+        }
+      } else {
+        // If the wallet does not support switching, inform the user
+        throw new Error(
+          `Please switch your wallet network to BSC (Chain ID 56) manually.`
+        );
+      }
     }
   }
   return BSC_CHAIN_ID;

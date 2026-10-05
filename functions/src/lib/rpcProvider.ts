@@ -2,10 +2,9 @@
 import * as functions from 'firebase-functions/v1';
 import { ethers } from 'ethers';
 
-const getBscConfig = () => functions.config().bsc || {};
-const getHttpUrl = () => getBscConfig().http_rpc_url || process.env.BSC_HTTP_RPC_URL || '';
-const getWsUrl = () => getBscConfig().ws_rpc_url || process.env.BSC_WS_RPC_URL || '';
-const getChainId = () => Number(getBscConfig().chain_id || process.env.BSC_CHAIN_ID || 56);
+const getHttpUrl = () => process.env.BSC_HTTP_RPC_URL || '';
+const getWsUrl = () => process.env.BSC_WS_RPC_URL || '';
+const getChainId = () => Number(process.env.BSC_CHAIN_ID || 56);
 
 let _httpProvider: ethers.JsonRpcProvider | null = null;
 export const getHttpProvider = () => {

