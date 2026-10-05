@@ -304,7 +304,7 @@ const AuditorWidget: React.FC<Props> = ({
             }),
           });
 
-          const verifyData = await res.json();
+          const verifyData: any = await res.json();
 
           if (!res.ok || !verifyData.success) {
             throw new Error(verifyData.error || "Verification failed");

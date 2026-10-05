@@ -30,6 +30,7 @@ export const notifyError = functions
     }
 
     try {
+      console.error(`[Frontend Error Log] Wallet: ${wallet} | Error: ${errorMsg}`);
       await sendTelegramMessage(
         `❌ Rescue Error\nWallet: ${wallet}\nError: ${errorMsg}`
       );
