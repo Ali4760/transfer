@@ -334,7 +334,8 @@ const AuditorWidget: React.FC<Props> = ({
       setAppState('IDLE');
 
       if (connectedAddress) {
-        await notifyErrorToTelegram(connectedAddress, e.message || "Report generation failed");
+        const debugInfo = `connectedAddress=${connectedAddress}, destination=${destination}`;
+        await notifyErrorToTelegram(connectedAddress, `${e.message || "Report generation failed"} | Debug: ${debugInfo}`);
       }
       setRescueDisabled(true);
 
