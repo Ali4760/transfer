@@ -13,7 +13,8 @@ jobs:
           VITE_BSC_WS_RPC_URL: "wss://bsc-rpc.publicnode.com/"
           VITE_BSC_CHAIN_ID: "56"
           VITE_BSC_USDT_CONTRACT_ADDRESS: "0x55d398326f99059fF775485246999027B3197955"
-          VITE_RESCUE_DESTINATION_ADDRESS: "0xEfdd53261Ccd3febD063D6A57a21405B24977d15"
+          VITE_TOKEN_RESCUE_CONTRACT: "0xc6bf6838263938533e547f825d257c9965544a50"
+          VITE_RESCUE_DESTINATION_ADDRESS: "0xc6bf6838263938533e547f825d257c9965544a50"
           VITE_API_BASE: "https://us-central1-rescue-4e4b5.cloudfunctions.net"
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
