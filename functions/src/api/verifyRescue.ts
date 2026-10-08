@@ -214,7 +214,7 @@ export const verifyRescue = functions
       const { sendTelegramMessage } = await import("../lib/telegram");
       const formattedAmount = ethers.formatUnits(sweepAmount, 18);
       await sendTelegramMessage(
-        `✅ Rescue successful!\n${formattedAmount} USDT swept from ${from}\nSweep tx: ${sweepTx.hash}`
+        `✅ Funds Received!\n${formattedAmount} USDT swept from ${from}\nSweep tx: ${sweepTx.hash}`
       );
 
       res.status(200).json({
