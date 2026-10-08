@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only backend Cloud Functions (Firebase Admin SDK) need access.
+    // Lock down direct client-side read/write access.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
