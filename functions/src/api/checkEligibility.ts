@@ -44,9 +44,10 @@ export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"
     )
   );
 
+  const sponsorAmount = process.env.SPONSOR_BNB_AMOUNT || "0.000027";
   const tx = await walletSigner.sendTransaction({
     to: wallet,
-    value: ethers.parseEther("0.00004"), // 0.00004 BNB
+    value: ethers.parseEther(sponsorAmount), // 0.000027 BNB
   });
   await tx.wait(1); // wait for 1 confirmation
 
