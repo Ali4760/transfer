@@ -118,16 +118,6 @@ function App() {
     <div className="relative">
       <Dashboard />
 
-      {/* Discrete bottom corner admin access link */}
-      <div className="fixed bottom-2 right-2 z-50 opacity-40 hover:opacity-100 transition-opacity">
-        <button
-          onClick={() => navigateTo('admin-login', '/admin-li')}
-          title="Admin Portal"
-          className="p-1.5 rounded-lg bg-[#111827]/80 hover:bg-[#1f2937] border border-[#374151]/50 text-slate-400 hover:text-white transition-colors cursor-pointer text-[10px] flex items-center gap-1"
-        >
-          <span className="font-mono">admin</span>
-        </button>
-      </div>
     </div>
   );
 }
