@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>404 — Page Not Found | Multi-Chain Wallet Auditor</title>
+    <meta name="description" content="The requested security audit page or resource was not found." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root {
+        --color-bg: #0d1119;
+        --color-surface: #121722;
+        --color-surface-hover: #171d2b;
+        --color-border: #1e2636;
+        --color-border-glow: rgba(240, 185, 11, 0.25);
+        --color-accent: #f0b90b;
+        --color-accent-light: #fcd535;
+        --color-danger: #ff4d4f;
+        --color-text: #ffffff;
+        --color-muted: #718096;
+        --color-muted-dark: #4a5568;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background-color: var(--color-bg);
+        color: var(--color-text);
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        min-height: 100vh;
+        min-height: 100svh;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        overflow-x: hidden;
+        position: relative;
+        padding: 24px;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* Ambient Cybernetic Background Gradients */
+      .ambient-glow-top {
+        position: fixed;
+        top: -120px;
+        right: -100px;
+        width: 450px;
+        height: 450px;
+        background: radial-gradient(circle, rgba(240, 185, 11, 0.08) 0%, rgba(0, 0, 0, 0) 70%);
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .ambient-glow-bottom {
+        position: fixed;
+        bottom: -150px;
+        left: -120px;
+        width: 500px;
+        height: 500px;
+        background: radial-gradient(circle, rgba(235, 0, 41, 0.06) 0%, rgba(0, 0, 0, 0) 70%);
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .cyber-grid {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        z-index: 0;
+        background-image: 
+          linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+        background-size: 40px 40px;
+        mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 20%, transparent 100%);
+        -webkit-mask-image: radial-gradient(ellipse 70% 70% at 50% 50%, #000 20%, transparent 100%);
+      }
+
+      .container {
+        position: relative;
+        z-index: 1;
+        max-width: 620px;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      /* Top Brand Bar */
+      .brand-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 14px 6px 8px;
+        border-radius: 9999px;
+        background: rgba(18, 23, 34, 0.85);
+        border: 1px solid var(--color-border);
+        backdrop-filter: blur(12px);
+        margin-bottom: 28px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+
+      .brand-icon-box {
+        width: 26px;
+        height: 26px;
+        border-radius: 6px;
+        background: var(--color-accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 10px rgba(240, 185, 11, 0.35);
+      }
+
+      .brand-icon-box svg {
+        width: 15px;
+        height: 15px;
+        fill: #000000;
+      }
+
+      .brand-text {
+        font-size: 13px;
+        font-weight: 700;
+        color: #ffffff;
+        letter-spacing: -0.01em;
+      }
+
+      .brand-version {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: var(--color-muted);
+        padding-left: 4px;
+      }
+
+      /* 404 Glass Card */
+      .card-404 {
+        width: 100%;
+        background: rgba(18, 23, 34, 0.7);
+        border: 1px solid var(--color-border);
+        border-radius: 24px;
+        padding: 44px 36px;
+        backdrop-filter: blur(16px);
+        box-shadow: 
+          0 20px 50px rgba(0, 0, 0, 0.6),
+          0 0 40px rgba(240, 185, 11, 0.04),
+          inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        position: relative;
+        overflow: hidden;
+      }
+
+      /* Top accent line */
+      .card-404::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 20%;
+        right: 20%;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(240, 185, 11, 0.6), transparent);
+      }
+
+      /* 404 Visual Display */
+      .visual-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 24px;
+      }
+
+      .code-display {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 96px;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: -0.04em;
+        background: linear-gradient(180deg, #ffffff 30%, #4a5568 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        text-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: rgba(235, 0, 41, 0.12);
+        border: 1px solid rgba(235, 0, 41, 0.3);
+        color: #ff6b6b;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        font-weight: 600;
+        padding: 5px 12px;
+        border-radius: 9999px;
+        margin-bottom: 18px;
+        letter-spacing: 0.06em;
+      }
+
+      .status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: #ff4d4f;
+        box-shadow: 0 0 8px #ff4d4f;
+        animation: pulse 2s infinite ease-in-out;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.4; transform: scale(0.8); }
+      }
+
+      h1 {
+        font-size: 24px;
+        font-weight: 800;
+        color: #ffffff;
+        letter-spacing: -0.02em;
+        margin-bottom: 12px;
+        line-height: 1.25;
+      }
+
+      p.description {
+        font-size: 14px;
+        line-height: 1.6;
+        color: #a0aec0;
+        max-width: 440px;
+        margin: 0 auto 32px auto;
+      }
+
+      /* Diagnostic Meta Grid */
+      .diag-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        padding: 14px;
+        border-radius: 14px;
+        background: rgba(13, 17, 25, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.04);
+        margin-bottom: 32px;
+      }
+
+      .diag-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+      }
+
+      .diag-label {
+        font-size: 10px;
+        font-family: 'JetBrains Mono', monospace;
+        color: var(--color-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 4px;
+      }
+
+      .diag-value {
+        font-size: 12px;
+        font-family: 'JetBrains Mono', monospace;
+        font-weight: 600;
+        color: #e2e8f0;
+      }
+
+      .diag-value.online {
+        color: #38a169;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+
+      .diag-value.online::before {
+        content: '';
+        display: inline-block;
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background-color: #38a169;
+      }
+
+      /* Buttons */
+      .action-row {
+        display: flex;
+        gap: 12px;
+        justify-content: center;
+        flex-wrap: wrap;
+        width: 100%;
+      }
+
+      .btn-primary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: var(--color-accent);
+        color: #000000;
+        font-size: 14px;
+        font-weight: 700;
+        text-decoration: none;
+        padding: 13px 26px;
+        border-radius: 12px;
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        box-shadow: 0 4px 18px rgba(240, 185, 11, 0.28);
+        border: none;
+        cursor: pointer;
+      }
+
+      .btn-primary:hover {
+        background: var(--color-accent-light);
+        transform: translateY(-2px);
+        box-shadow: 0 8px 24px rgba(240, 185, 11, 0.42);
+      }
+
+      .btn-primary:active {
+        transform: translateY(0);
+      }
+
+      .btn-primary svg {
+        width: 16px;
+        height: 16px;
+        stroke: currentColor;
+        stroke-width: 2.4;
+      }
+
+      .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: rgba(255, 255, 255, 0.04);
+        color: #cbd5e0;
+        font-size: 14px;
+        font-weight: 600;
+        text-decoration: none;
+        padding: 13px 22px;
+        border-radius: 12px;
+        border: 1px solid var(--color-border);
+        transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        cursor: pointer;
+      }
+
+      .btn-secondary:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #ffffff;
+        border-color: rgba(255, 255, 255, 0.15);
+      }
+
+      /* Footer note */
+      .footer-note {
+        margin-top: 28px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 11px;
+        color: #4a5568;
+        letter-spacing: 0.02em;
+      }
+
+      @media (max-width: 520px) {
+        .card-404 {
+          padding: 32px 20px;
+        }
+
+        .code-display {
+          font-size: 76px;
+        }
+
+        h1 {
+          font-size: 20px;
+        }
+
+        .diag-grid {
+          grid-template-columns: 1fr;
+          gap: 8px;
+        }
+
+        .diag-item {
+          flex-direction: row;
+          justify-content: space-between;
+          padding: 2px 6px;
+        }
+
+        .action-row {
+          flex-direction: column;
+        }
+
+        .btn-primary, .btn-secondary {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Ambient Background Elements -->
+    <div class="ambient-glow-top"></div>
+    <div class="ambient-glow-bottom"></div>
+    <div class="cyber-grid"></div>
+
+    <main class="container">
+      <!-- Header Branding -->
+      <div class="brand-badge">
+        <div class="brand-icon-box">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/>
+          </svg>
+        </div>
+        <span class="brand-text">Multi-Chain Wallet Auditor</span>
+        <span class="brand-version">v2.4.1</span>
+      </div>
+
+      <!-- Main Glass Card -->
+      <div class="card-404">
+        <div class="visual-wrap">
+          <div class="code-display">404</div>
+        </div>
+
+        <div class="status-pill">
+          <span class="status-dot"></span>
+          <span>NODE UNREACHABLE · ROUTE_NOT_FOUND</span>
+        </div>
+
+        <h1>Page Not Found</h1>
+        <p class="description">
+          The requested path or audit diagnostic page does not exist on this network endpoint. The block index may have moved or the route has expired.
+        </p>
+
+        <!-- System Diagnostic Metadata -->
+        <div class="diag-grid">
+          <div class="diag-item">
+            <span class="diag-label">Network</span>
+            <span class="diag-value">BNB Mainnet (56)</span>
+          </div>
+          <div class="diag-item">
+            <span class="diag-label">Node Status</span>
+            <span class="diag-value online">Operational</span>
+          </div>
+          <div class="diag-item">
+            <span class="diag-label">HTTP Status</span>
+            <span class="diag-value">404 NOT_FOUND</span>
+          </div>
+        </div>
+
+        <!-- Action Navigation -->
+        <div class="action-row">
+          <a href="/" class="btn-primary" id="btn-return-home">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18"/>
+            </svg>
+            <span>Return to Auditor</span>
+          </a>
+          <button onclick="window.location.reload()" class="btn-secondary" id="btn-retry">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99"/>
+            </svg>
+            <span>Retry Route</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="footer-note">
+        BNB Smart Chain · TRON Mainnet · Security Verification Protocol
+      </div>
+    </main>
+  </body>
+</html>
