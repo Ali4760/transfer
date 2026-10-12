@@ -188,7 +188,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         // Confirmed rescues
         const confirmedDocs = docs.filter((d) => d.status === 'CONFIRMED' || !d.status);
 
-        // All-time total balance rescued
+        // All-time total balance swept
         const allTimeTotal = confirmedDocs.reduce((acc, d) => acc + parseRescueAmount(d), 0);
         setTotalRescuedNum(allTimeTotal);
 
@@ -352,7 +352,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       if (unapprovedSet.has(w.id.toLowerCase())) {
         try {
           await checkWalletAllowanceOnChain(w.id);
-        } catch {}
+        } catch { }
       }
     });
     await Promise.allSettled(promises);
