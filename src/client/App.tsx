@@ -3,23 +3,34 @@ import React, { useState, useEffect } from 'react';
 import Dashboard from './pages/Dashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
+import NotFound from './pages/NotFound';
 import { AdminDataProvider } from './context/AdminDataContext';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './config/firebase';
 
-type RouteType = 'public' | 'admin-login';
+type RouteType = 'public' | 'admin-login' | 'not-found';
 
-// ── Only the exact /admin-li path opens the admin portal.
-// Every other /admin/* URL is treated as public.
+/**
+ * URL Routing Rules:
+ * - "/" or "" => "public" (Main auditor website)
+ * - "/admin-li" or "/admin-li/" => "admin-login" (Admin portal)
+ * - Any other URL (e.g. "/admin", "/login", "/dashboard", etc.) => "not-found" (404 Error)
+ */
 function getInitialRoute(): RouteType {
   const path = window.location.pathname.toLowerCase();
 
-  // Exact match: /admin-li or /admin-li/ (with optional trailing slash)
+  // Root path: exact match for homepage
+  if (path === '/' || path === '') {
+    return 'public';
+  }
+
+  // Admin portal: exact match for /admin-li
   if (path === '/admin-li' || path === '/admin-li/') {
     return 'admin-login';
   }
 
-  return 'public';
+  // Any other URL returns 404
+  return 'not-found';
 }
 
 function App() {
@@ -56,6 +67,11 @@ function App() {
     }
   };
 
+  // ── 404 Not Found Page ─────────────────────────────────────────
+  if (route === 'not-found') {
+    return <NotFound onNavigateHome={() => navigateTo('public', '/')} />;
+  }
+
   // ── Show the auth-check spinner ONLY while on an admin route.
   // Public visitors never see this screen.
   if (isAdminRoute && isAuthChecking) {
@@ -77,7 +93,7 @@ function App() {
         <AdminDataProvider>
           <AdminDashboard
             onLogout={() => {
-              // Sign out is performed in AdminDashboard; onAuthStateChanged automatically
+              // Sign out is handled within AdminDashboard; onAuthStateChanged automatically
               // sets isAuthenticated = false and switches view to AdminLogin at /admin-li
             }}
             onNavigateHome={() => navigateTo('public', '/')}
@@ -89,14 +105,14 @@ function App() {
       <AdminLogin
         onSuccess={() => {
           // onAuthStateChanged automatically sets isAuthenticated = true
-          // Keeps URL locked at /admin-li (no reload, no redirect to /admin/dashboard)
+          // Keeps URL locked at /admin-li
         }}
         onNavigateHome={() => navigateTo('public', '/')}
       />
     );
   }
 
-  // ── Public website ─────────────────────────────────────────────
+  // ── Public website (only on /) ─────────────────────────────────
   return (
     <div className="relative">
       <Dashboard />
