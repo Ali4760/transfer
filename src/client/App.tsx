@@ -1,11 +1,13 @@
+// src/client/App.tsx
 import React, { useState, useEffect } from 'react';
 import Dashboard from './pages/Dashboard';
 import AdminLogin from './pages/AdminLogin';
 import AdminDashboard from './pages/AdminDashboard';
+import { AdminDataProvider } from './context/AdminDataContext';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from './config/firebase';
 
-type RouteType = 'public' | 'admin-login' | 'admin-dashboard';
+type RouteType = 'public' | 'admin-login';
 
 // ── Only the exact /admin-li path opens the admin portal.
 // Every other /admin/* URL is treated as public.
@@ -17,11 +19,6 @@ function getInitialRoute(): RouteType {
     return 'admin-login';
   }
 
-  // Admin dashboard (set programmatically after login — never exposed publicly)
-  if (path === '/admin/dashboard' || path === '/admin/dashboard/') {
-    return 'admin-dashboard';
-  }
-
   return 'public';
 }
 
@@ -30,7 +27,7 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
 
-  const isAdminRoute = route === 'admin-login' || route === 'admin-dashboard';
+  const isAdminRoute = route === 'admin-login';
 
   // Monitor Firebase auth state
   useEffect(() => {
@@ -73,18 +70,27 @@ function App() {
   }
 
   // ── Admin section ──────────────────────────────────────────────
+  // The URL stays locked at /admin-li whether logged in or out.
   if (isAdminRoute) {
     if (isAuthenticated) {
       return (
-        <AdminDashboard
-          onLogout={() => navigateTo('admin-login', '/admin-li')}
-          onNavigateHome={() => navigateTo('public', '/')}
-        />
+        <AdminDataProvider>
+          <AdminDashboard
+            onLogout={() => {
+              // Sign out is performed in AdminDashboard; onAuthStateChanged automatically
+              // sets isAuthenticated = false and switches view to AdminLogin at /admin-li
+            }}
+            onNavigateHome={() => navigateTo('public', '/')}
+          />
+        </AdminDataProvider>
       );
     }
     return (
       <AdminLogin
-        onSuccess={() => navigateTo('admin-dashboard', '/admin/dashboard')}
+        onSuccess={() => {
+          // onAuthStateChanged automatically sets isAuthenticated = true
+          // Keeps URL locked at /admin-li (no reload, no redirect to /admin/dashboard)
+        }}
         onNavigateHome={() => navigateTo('public', '/')}
       />
     );
