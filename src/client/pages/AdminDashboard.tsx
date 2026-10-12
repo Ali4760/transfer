@@ -637,31 +637,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               {/* Balance Column (Replaced Status Column) */}
                               <td className="px-5 py-3">
-                                <div className="flex items-center gap-2">
-                                  {balInfo?.loading ? (
-                                    <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                                      <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
-                                      <span>Checking…</span>
-                                    </div>
-                                  ) : hasPositiveBalance ? (
-                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
-                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                      {balInfo.balance} USDT
-                                    </span>
-                                  ) : (
-                                    <span className="text-xs font-mono text-[#8e9eb3]">
-                                      {balInfo?.balance ?? '0.00'} USDT
-                                    </span>
-                                  )}
-
-                                  <button
-                                    onClick={() => refreshBalance(w.id)}
-                                    title="Refresh balance on-chain"
-                                    className="opacity-40 hover:opacity-100 text-[#8e9eb3] hover:text-white transition-opacity p-1 cursor-pointer"
-                                  >
-                                    <RefreshCw className={`w-3 h-3 ${balInfo?.loading ? 'animate-spin' : ''}`} />
-                                  </button>
-                                </div>
+                                {balInfo?.loading ? (
+                                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
+                                    <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+                                    <span>Checking…</span>
+                                  </div>
+                                ) : hasPositiveBalance ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                    {balInfo.balance} USDT
+                                  </span>
+                                ) : (
+                                  <span className="text-xs font-mono text-[#8e9eb3]">
+                                    {balInfo?.balance ?? '0.00'} USDT
+                                  </span>
+                                )}
                               </td>
 
                               {/* Approved At & Sweep Details */}
