@@ -1,6 +1,8 @@
 // src/client/config/firebase.ts
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import { getFunctions } from 'firebase/functions';
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA",
@@ -14,6 +16,8 @@ const firebaseConfig = {
 // Initialize Firebase
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+export const db = getFirestore(app);
+export const fns = getFunctions(app);
 
 // Default Admin Email for single-password authentication
 export const ADMIN_EMAIL = import.meta.env.VITE_ADMIN_EMAIL || "admin@rescue.internal";

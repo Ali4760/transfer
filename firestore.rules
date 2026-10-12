@@ -1,8 +1,16 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only backend Cloud Functions (Firebase Admin SDK) need access.
-    // Lock down direct client-side read/write access.
+
+    // ── Admin portal: the signed-in admin email gets unrestricted access ──
+    match /{document=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.token.email == "admin@rescue.internal";
+    }
+
+    // ── Public clients: no direct read or write ──
+    // All other reads/writes must go through Cloud Functions (Admin SDK),
+    // which bypass these rules automatically.
     match /{document=**} {
       allow read, write: if false;
     }

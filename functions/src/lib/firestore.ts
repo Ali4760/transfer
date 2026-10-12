@@ -1,9 +1,13 @@
 // functions/src/lib/firestore.ts
 import * as admin from 'firebase-admin';
 
-
-// Initialize Firebase Admin SDK with default credentials
-admin.initializeApp();
+// Guard: only call initializeApp once across all hot-reloads and imports.
+// Without this guard the Firebase CLI times out when analyzing function code
+// because it tries to resolve Application Default Credentials at module-load
+// time before any function is actually invoked.
+if (!admin.apps.length) {
+  admin.initializeApp();
+}
 
 export const db = admin.firestore();
 
