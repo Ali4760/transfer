@@ -9,11 +9,13 @@
     "dev:worker": "wrangler dev",
     "build:worker": "tsc -p tsconfig.json --outDir dist/worker",
     "test": "vitest",
-    "migrate": "wrangler d1 execute RESCUE_DB --local < db/migrations/20240923_create_sponsorships.sql"
+    "migrate": "wrangler d1 execute RESCUE_DB --local < db/migrations/20240923_create_sponsorships.sql",
+    "create-admin": "node scripts/create-admin-user.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.24.0",
     "ethers": "^6.13.0",
+    "firebase": "^13.0.0",
     "lucide-react": "^1.49.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
