@@ -39,6 +39,7 @@ interface AdminDataContextType {
   latestSweepsMap: Record<string, SweepInfo>;
   balances: Record<string, { balance: string; loading: boolean }>;
   refreshBalance: (address: string) => Promise<void>;
+  refreshAllBalances: () => Promise<void>;
   recordLocalSweep: (address: string, txHash?: string, amount?: string) => void;
   connectedCount: number;
   unlimitedTodayCount: number;
@@ -193,12 +194,15 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   }, []);
 
   // ── Fetch & Monitor on-chain USDT balances for connected wallets ────────
-  const fetchSingleBalance = useCallback(async (address: string) => {
+  // silent: if true, does not trigger loading state to avoid UI flicker
+  const fetchSingleBalance = useCallback(async (address: string, silent = false) => {
     const lower = address.toLowerCase();
-    setBalances((prev) => ({
-      ...prev,
-      [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: true },
-    }));
+    if (!silent) {
+      setBalances((prev) => ({
+        ...prev,
+        [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: true },
+      }));
+    }
 
     try {
       const bal = await fetchOnChainUSDTBalance(address);
@@ -214,7 +218,12 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, []);
 
-  // Monitor balances for all wallets whenever the wallet list changes
+  const refreshAllBalances = useCallback(async () => {
+    const promises = allWallets.map((w) => fetchSingleBalance(w.id, true));
+    await Promise.allSettled(promises);
+  }, [allWallets, fetchSingleBalance]);
+
+  // Initial balance load for wallets that don't have balance yet
   useEffect(() => {
     if (allWallets.length === 0) return;
 
@@ -224,23 +233,15 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       for (const w of allWallets) {
         if (!isSubscribed) break;
         const lower = w.id.toLowerCase();
-        // Skip if already loaded and not older
         if (balances[lower] && !balances[lower].loading) continue;
-        await fetchSingleBalance(w.id);
+        await fetchSingleBalance(w.id, false);
       }
     };
 
     checkBalances();
 
-    // Periodic live refresh every 30 seconds
-    const interval = setInterval(() => {
-      if (!isSubscribed) return;
-      allWallets.forEach((w) => fetchSingleBalance(w.id));
-    }, 30000);
-
     return () => {
       isSubscribed = false;
-      clearInterval(interval);
     };
   }, [allWallets, fetchSingleBalance]);
 
@@ -311,7 +312,8 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         twoDayStats,
         latestSweepsMap,
         balances,
-        refreshBalance: fetchSingleBalance,
+        refreshBalance: (addr) => fetchSingleBalance(addr, false),
+        refreshAllBalances,
         recordLocalSweep,
         connectedCount,
         unlimitedTodayCount,

@@ -38,6 +38,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('dashboard');
   const [activeMainTab, setActiveMainTab] = useState<MainTab>('connected');
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isRefreshingWallets, setIsRefreshingWallets] = useState(false);
 
   // ── Real-time state from shared AdminDataContext ─────────────────
   const {
@@ -48,6 +49,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     latestSweepsMap,
     balances,
     refreshBalance,
+    refreshAllBalances,
     recordLocalSweep,
     isLoading: metricsLoading,
     error: metricsError,
@@ -73,6 +75,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error('Sign out error:', err);
     } finally {
       setIsLoggingOut(false);
+    }
+  };
+
+  // ── Manual refresh handler for Wallets page (in-place seamless update) ──
+  const handleRefreshWallets = async () => {
+    setIsRefreshingWallets(true);
+    try {
+      await refreshAllBalances();
+    } catch (err) {
+      console.error('Refresh wallets error:', err);
+    } finally {
+      setIsRefreshingWallets(false);
     }
   };
 
@@ -152,16 +166,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       )}
       {sidebarTab === tab && <ChevronRight className="w-3.5 h-3.5 text-blue-300" />}
     </button>
-  );
-
-  const LiveSyncBadge = () => (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-emerald-500/20 bg-emerald-500/5 text-emerald-400 text-xs font-mono">
-      <span className="relative flex h-2 w-2">
-        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
-      </span>
-      <span>Live Sync Active</span>
-    </div>
   );
 
   const MetricCard = ({
@@ -385,10 +389,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     />
                   </div>
 
-                  <div className="flex justify-end">
-                    <LiveSyncBadge />
-                  </div>
-
                   {/* Manual sweep form */}
                   <div className="bg-[#121b2d] border border-[#24344d] rounded-2xl p-6">
                     <h3 className="text-base font-bold text-white mb-1">Manual Wallet Sweep</h3>
@@ -446,9 +446,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       color="blue"
                     />
                   </div>
-                  <div className="flex justify-end">
-                    <LiveSyncBadge />
-                  </div>
                 </div>
               )}
 
@@ -477,9 +474,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
                       <p className="text-[11px] text-[#8e9eb3]">ERC-20 allowance verification — on-chain</p>
                     </div>
-                  </div>
-                  <div className="flex justify-end">
-                    <LiveSyncBadge />
                   </div>
                 </div>
               )}
@@ -510,9 +504,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       color="purple"
                     />
                   </div>
-                  <div className="flex justify-end">
-                    <LiveSyncBadge />
-                  </div>
                 </div>
               )}
             </div>
@@ -528,7 +519,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     Live balance monitoring &amp; instant sweep. Newly connected &amp; latest swept appear on top.
                   </p>
                 </div>
-                <LiveSyncBadge />
+
+                {/* Refresh text button (seamless in-place update with zero blank screen) */}
+                <button
+                  onClick={handleRefreshWallets}
+                  disabled={isRefreshingWallets}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#23354f] bg-[#131e31] hover:bg-[#1a2842] text-xs font-medium text-[#8e9eb3] hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingWallets ? 'animate-spin text-blue-400' : 'text-[#8e9eb3]'}`} />
+                  <span>{isRefreshingWallets ? 'Refreshing…' : 'Refresh'}</span>
+                </button>
               </div>
 
               {/* Global sweep result */}
@@ -562,12 +562,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
               )}
 
-              {metricsLoading ? (
+              {/* Keep screen as it is; only show initial loading if there are 0 wallets loaded yet */}
+              {metricsLoading && sortedWallets.length === 0 ? (
                 <div className="flex items-center justify-center py-16 text-slate-400 gap-3">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span className="text-sm">Streaming live wallets…</span>
                 </div>
-              ) : metricsError ? (
+              ) : metricsError && sortedWallets.length === 0 ? (
                 <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-red-900/20 border border-red-500/30 text-red-400 text-xs">
                   <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                   <span>{metricsError}</span>
