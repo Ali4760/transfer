@@ -1,5 +1,5 @@
 // src/client/pages/AdminDashboard.tsx
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   Shield,
   LogOut,
@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
-import { auth, fns } from '../config/firebase';
+import { auth, fns, SESSION_TIMEOUT_MS, SESSION_WARN_MS } from '../config/firebase';
 import { useAdminData } from '../context/AdminDataContext';
 
 interface AdminDashboardProps {
@@ -41,6 +41,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [checkingAllowanceId, setCheckingAllowanceId] = useState<string | null>(null);
   const [isCheckingAllAllowances, setIsCheckingAllAllowances] = useState(false);
   const [checkSuccessMsg, setCheckSuccessMsg] = useState<string | null>(null);
+
+  // ── Security: Inactivity auto-logout ─────────────────────────────
+  const [inactivityWarning, setInactivityWarning] = useState(false);
+  const [secondsUntilLogout, setSecondsUntilLogout] = useState(Math.round(SESSION_WARN_MS / 1000));
+  const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warningTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const doSignOut = useCallback(async () => {
+    try {
+      await signOut(auth);
+      onLogout();
+    } catch (err) {
+      console.error('[Security] Auto-logout error:', err);
+    }
+  }, [onLogout]);
+
+  const clearAllTimers = useCallback(() => {
+    if (inactivityTimer.current) clearTimeout(inactivityTimer.current);
+    if (warningTimer.current)    clearTimeout(warningTimer.current);
+    if (countdownTimer.current)  clearInterval(countdownTimer.current);
+  }, []);
+
+  const resetInactivityTimer = useCallback(() => {
+    clearAllTimers();
+    setInactivityWarning(false);
+    setSecondsUntilLogout(Math.round(SESSION_WARN_MS / 1000));
+
+    // After (TIMEOUT - WARN) show the warning banner
+    warningTimer.current = setTimeout(() => {
+      setInactivityWarning(true);
+      let secs = Math.round(SESSION_WARN_MS / 1000);
+      setSecondsUntilLogout(secs);
+      countdownTimer.current = setInterval(() => {
+        secs -= 1;
+        setSecondsUntilLogout(secs);
+        if (secs <= 0) {
+          if (countdownTimer.current) clearInterval(countdownTimer.current);
+        }
+      }, 1000);
+    }, SESSION_TIMEOUT_MS - SESSION_WARN_MS);
+
+    // After full TIMEOUT, sign out automatically
+    inactivityTimer.current = setTimeout(() => {
+      doSignOut();
+    }, SESSION_TIMEOUT_MS);
+  }, [clearAllTimers, doSignOut]);
+
+  // Attach activity listeners on mount; reset timer on any user interaction
+  useEffect(() => {
+    const ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'] as const;
+    const handleActivity = () => resetInactivityTimer();
+    ACTIVITY_EVENTS.forEach(evt => document.addEventListener(evt, handleActivity, { passive: true }));
+    resetInactivityTimer(); // start the first timer
+    return () => {
+      ACTIVITY_EVENTS.forEach(evt => document.removeEventListener(evt, handleActivity));
+      clearAllTimers();
+    };
+  }, [resetInactivityTimer, clearAllTimers]);
 
   // ── Real-time state from shared AdminDataContext ─────────────────
   const {
@@ -75,6 +134,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ── Sign out handler ──────────────────────────────────────────────
   const handleSignOut = async () => {
+    clearAllTimers();
     setIsLoggingOut(true);
     try {
       await signOut(auth);
@@ -277,6 +337,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="min-h-[100svh] bg-[#0a0f1d] text-slate-100 font-sans flex flex-col">
+      {/* ═══ Security: Inactivity Warning Banner ══════════════════ */}
+      {inactivityWarning && (
+        <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between gap-3 px-4 py-2.5 bg-amber-600/95 backdrop-blur-sm border-b border-amber-500 shadow-lg shadow-amber-900/40 text-white text-sm font-medium animate-pulse-slow">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-200 flex-shrink-0" />
+            <span>
+              Session expiring due to inactivity —{' '}
+              <span className="font-bold font-mono">{secondsUntilLogout}s</span>{' '}
+              until automatic logout.
+            </span>
+          </div>
+          <button
+            onClick={resetInactivityTimer}
+            className="flex-shrink-0 px-3 py-1 rounded-lg bg-white/20 hover:bg-white/30 border border-white/30 text-xs font-semibold transition-colors cursor-pointer"
+          >
+            Stay Logged In
+          </button>
+        </div>
+      )}
+
       {/* ═══ Header ══════════════════════════════════════════════ */}
       <header className="border-b border-[#1e2a3f] bg-[#0e1627]/90 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">

