@@ -69,11 +69,12 @@ function startOfToday(): Timestamp {
 }
 
 const BSC_RPCS = [
-  'https://bsc-dataseed.binance.org/',
   'https://bsc-rpc.publicnode.com/',
-  'https://1rpc.io/bnb',
+  'https://bsc-dataseed.binance.org/',
   'https://bsc-dataseed1.defibit.io/',
   'https://bsc-dataseed1.ninicoin.io/',
+  'https://bsc-dataseed2.defibit.io/',
+  'https://bsc-dataseed2.ninicoin.io/',
 ];
 
 const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';
@@ -101,7 +102,7 @@ function formatUSDTBal(rawBal: bigint): string {
 }
 
 /** Race a promise with a timeout in milliseconds */
-function withTimeout<T>(promise: Promise<T>, ms = 4000): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms = 4500): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
@@ -119,7 +120,10 @@ async function fetchBatchUSDTBalances(
 ): Promise<Record<string, string>> {
   if (addresses.length === 0) return {};
 
-  const calls = addresses.map((addr) => ({
+  const validAddresses = addresses.filter((a) => ethers.isAddress(a));
+  if (validAddresses.length === 0) return {};
+
+  const calls = validAddresses.map((addr) => ({
     target: USDT_CONTRACT,
     allowFailure: true,
     callData: erc20Interface.encodeFunctionData('balanceOf', [addr]),
@@ -137,10 +141,10 @@ async function fetchBatchUSDTBalances(
       );
 
       const rawResults: Array<{ success: boolean; returnData: string }> =
-        await withTimeout(multicallContract.aggregate3(calls), 4000);
+        await withTimeout(multicallContract.aggregate3(calls), 4500);
 
       rawResults.forEach((res, idx) => {
-        const lower = addresses[idx].toLowerCase();
+        const lower = validAddresses[idx].toLowerCase();
         if (res.success && res.returnData && res.returnData !== '0x') {
           try {
             const decoded = erc20Interface.decodeFunctionResult(
@@ -162,20 +166,27 @@ async function fetchBatchUSDTBalances(
     }
   }
 
-  // Fallback if all multicall attempts fail
-  addresses.forEach((a) => {
-    results[a.toLowerCase()] = '0.00';
-  });
+  // Fallback if all multicall attempts fail: query directly with graceful fallback
+  for (const addr of validAddresses) {
+    try {
+      results[addr.toLowerCase()] = await fetchOnChainUSDTBalance(addr);
+    } catch {
+      results[addr.toLowerCase()] = '0.00';
+    }
+  }
+
   return results;
 }
 
-/** Fallback single wallet balance fetcher with timeout */
+/** Direct single wallet balance fetcher with timeout and RPC rotation */
 async function fetchOnChainUSDTBalance(address: string): Promise<string> {
+  if (!ethers.isAddress(address)) return '0.00';
+
   for (const rpc of BSC_RPCS) {
     try {
       const provider = new ethers.JsonRpcProvider(rpc, 56, { staticNetwork: true });
       const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, provider);
-      const rawBal: bigint = await withTimeout(contract.balanceOf(address), 3500);
+      const rawBal: bigint = await withTimeout(contract.balanceOf(address), 4000);
       return formatUSDTBal(rawBal);
     } catch {
       // try next fallback rpc
@@ -409,8 +420,8 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     return false;
   }, [markWalletApproved, markWalletUnapproved]);
 
-  // ── High-Speed Multicall Balance Fetching (Instant, zero rate-limit) ────────
-  const fetchSingleBalance = useCallback(async (address: string, silent = true) => {
+  // ── Single Wallet Balance Fetching (Direct On-Chain via standard balanceOf) ─
+  const fetchSingleBalance = useCallback(async (address: string, silent = false) => {
     const lower = address.toLowerCase();
     if (!silent) {
       setBalances((prev) => ({
@@ -420,17 +431,19 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
 
     try {
-      const balMap = await fetchBatchUSDTBalances([address]);
-      const bal = balMap[lower] ?? '0.00';
+      const bal = await fetchOnChainUSDTBalance(address);
       setBalances((prev) => ({
         ...prev,
         [lower]: { balance: bal, loading: false },
       }));
-    } catch {
+      return bal;
+    } catch (err) {
+      console.error(`Failed to refresh balance for ${address}:`, err);
       setBalances((prev) => ({
         ...prev,
         [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: false },
       }));
+      return prev[lower]?.balance ?? '0.00';
     }
   }, []);
 
@@ -458,7 +471,8 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         });
         return next;
       });
-    } catch {
+    } catch (err) {
+      console.error('refreshAllBalances error:', err);
       // In case of error, reset loading state
       setBalances((prev) => {
         const next = { ...prev };
@@ -471,27 +485,26 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     }
   }, [allWallets]);
 
-  // Initial balance load and live periodic update using 1 single Multicall roundtrip
+  // Initial balance load on wallet change (without recurring 5-second interval timer)
   useEffect(() => {
     if (allWallets.length === 0) return;
 
     let isSubscribed = true;
 
-    const runBatchUpdate = async (showLoading = false) => {
-      if (!isSubscribed) return;
+    const runInitialBatch = async () => {
       const addresses = allWallets.map((w) => w.id);
-      if (showLoading) {
-        setBalances((prev) => {
-          const next = { ...prev };
-          addresses.forEach((addr) => {
-            const lower = addr.toLowerCase();
-            if (!prev[lower]) {
-              next[lower] = { balance: '0.00', loading: true };
-            }
-          });
-          return next;
+      setBalances((prev) => {
+        const next = { ...prev };
+        let hasNew = false;
+        addresses.forEach((addr) => {
+          const lower = addr.toLowerCase();
+          if (!prev[lower]) {
+            next[lower] = { balance: '0.00', loading: true };
+            hasNew = true;
+          }
         });
-      }
+        return hasNew ? next : prev;
+      });
 
       try {
         const balMap = await fetchBatchUSDTBalances(addresses);
@@ -500,26 +513,19 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
           const next = { ...prev };
           addresses.forEach((addr) => {
             const lower = addr.toLowerCase();
-            next[lower] = { balance: balMap[lower] ?? '0.00', loading: false };
+            next[lower] = { balance: balMap[lower] ?? prev[lower]?.balance ?? '0.00', loading: false };
           });
           return next;
         });
       } catch (err) {
-        console.warn('Batch balance update error:', err);
+        console.warn('Initial balance load error:', err);
       }
     };
 
-    // Immediate initial check
-    runBatchUpdate(true);
-
-    // 5-second live refresh via single Multicall (< 1 second roundtrip, no rate-limiting)
-    const interval = setInterval(() => {
-      runBatchUpdate(false);
-    }, 5000);
+    runInitialBatch();
 
     return () => {
       isSubscribed = false;
-      clearInterval(interval);
     };
   }, [allWallets]);
 

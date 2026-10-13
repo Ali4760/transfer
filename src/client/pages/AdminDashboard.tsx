@@ -113,6 +113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     unlimitedTodayCount,
     latestSweepsMap,
     balances,
+    refreshBalance,
     refreshAllBalances,
     recordLocalSweep,
     markWalletUnapproved,
@@ -126,6 +127,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [sweepAddress, setSweepAddress] = useState('');
   const [sweepLoading, setSweepLoading] = useState(false);
   const [sweepingId, setSweepingId] = useState<string | null>(null); // per-row tracking
+  const [refreshingWalletId, setRefreshingWalletId] = useState<string | null>(null); // per-wallet balance refresh tracking
   const [sweepResult, setSweepResult] = useState<{
     success: boolean;
     message: string;
@@ -146,15 +148,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // ── Manual refresh handler for Wallets page (in-place seamless update) ──
+  // ── Manual refresh handler for Wallets page (in-place seamless update with guaranteed visible animation) ──
   const handleRefreshWallets = async () => {
     setIsRefreshingWallets(true);
+    const minDelay = new Promise((resolve) => setTimeout(resolve, 800));
     try {
-      await refreshAllBalances();
+      await Promise.all([refreshAllBalances(), minDelay]);
     } catch (err) {
       console.error('Refresh wallets error:', err);
+      await minDelay;
     } finally {
       setIsRefreshingWallets(false);
+    }
+  };
+
+  // ── Single wallet balance refresh handler ──────────────────────────
+  const handleRefreshSingleBalance = async (address: string) => {
+    setRefreshingWalletId(address);
+    const minDelay = new Promise((resolve) => setTimeout(resolve, 700));
+    try {
+      await Promise.all([refreshBalance(address), minDelay]);
+    } catch (err) {
+      console.error('Failed to refresh balance for', address, err);
+      await minDelay;
+    } finally {
+      setRefreshingWalletId((prev) => (prev === address ? null : prev));
     }
   };
 
@@ -789,21 +807,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               {/* Balance */}
                               <td className="px-5 py-3">
-                                {balInfo?.loading ? (
-                                  <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono">
-                                    <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
-                                    <span>Checking…</span>
-                                  </div>
-                                ) : hasPositiveBalance ? (
-                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                    {balInfo.balance} USDT
-                                  </span>
-                                ) : (
-                                  <span className="text-xs font-mono text-[#8e9eb3]">
-                                    {balInfo?.balance ?? '0.00'} USDT
-                                  </span>
-                                )}
+                                <div className="inline-flex items-center gap-2">
+                                  {balInfo?.loading || refreshingWalletId === w.id ? (
+                                    <div className="flex items-center gap-1.5 text-xs text-blue-400 font-mono">
+                                      <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />
+                                      <span>Checking…</span>
+                                    </div>
+                                  ) : hasPositiveBalance ? (
+                                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                      {balInfo.balance} USDT
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs font-mono text-[#8e9eb3]">
+                                      {balInfo?.balance ?? '0.00'} USDT
+                                    </span>
+                                  )}
+
+                                  {/* Tiny refresh icon for this specific wallet */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleRefreshSingleBalance(w.id);
+                                    }}
+                                    disabled={balInfo?.loading || refreshingWalletId === w.id}
+                                    title="Refresh balance for this wallet"
+                                    className="p-1 rounded-md text-[#64748b] hover:text-[#38bdf8] hover:bg-[#1a2842] transition-colors cursor-pointer disabled:opacity-40"
+                                  >
+                                    <RefreshCw
+                                      className={`w-3 h-3 ${
+                                        balInfo?.loading || refreshingWalletId === w.id
+                                          ? 'animate-spin text-blue-400'
+                                          : ''
+                                      }`}
+                                    />
+                                  </button>
+                                </div>
                               </td>
 
                               {/* Status / Approved At column */}
