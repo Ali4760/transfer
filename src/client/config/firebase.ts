@@ -5,13 +5,17 @@ import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA",
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "rescue-4e4b5.firebaseapp.com",
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "rescue-4e4b5",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "rescue-4e4b5.firebasestorage.app",
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "1069735572173",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:1069735572173:web:47c14d69015807e6d62f84",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
 };
+
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  console.error('[Firebase] Missing required environment variables (VITE_FIREBASE_API_KEY or VITE_FIREBASE_PROJECT_ID). Check your .env file.');
+}
 
 // Initialize Firebase
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();

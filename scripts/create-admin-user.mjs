@@ -1,8 +1,30 @@
 // scripts/create-admin-user.mjs
 import https from 'https';
 
-const API_KEY = process.env.VITE_FIREBASE_API_KEY || "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA";
-const email = process.argv[2] || process.env.VITE_ADMIN_EMAIL || "admin@rescue.internal";
+import fs from 'fs';
+
+let API_KEY = process.env.VITE_FIREBASE_API_KEY;
+let defaultAdminEmail = process.env.VITE_ADMIN_EMAIL;
+
+if (!API_KEY && fs.existsSync('.env')) {
+  const envContent = fs.readFileSync('.env', 'utf-8');
+  for (const line of envContent.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('VITE_FIREBASE_API_KEY=')) {
+      API_KEY = trimmed.substring('VITE_FIREBASE_API_KEY='.length).trim();
+    }
+    if (trimmed.startsWith('VITE_ADMIN_EMAIL=')) {
+      defaultAdminEmail = trimmed.substring('VITE_ADMIN_EMAIL='.length).trim();
+    }
+  }
+}
+
+if (!API_KEY) {
+  console.error('Error: VITE_FIREBASE_API_KEY is not set. Please set it in .env or the environment.');
+  process.exit(1);
+}
+
+const email = process.argv[2] || defaultAdminEmail || "admin@rescue.internal";
 const password = process.argv[3];
 
 if (!password) {

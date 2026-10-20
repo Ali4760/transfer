@@ -1,11 +1,41 @@
+# Node dependencies & build artifacts
 node_modules/
 dist/
+dist/worker/
+*.tsbuildinfo
+
+# Secrets & Environment variables
 .env
 .env.*
 .env.local
+token.txt
+*.pem
+*.key
+*service-account*.json
+*-adminsdk*.json
+
+# Firebase artifacts & logs
 .firebase/
 firebase-debug.log
+firebase-debug.*.log
+firestore-debug.log
+logs.txt
+
+# Cloud Functions build
 functions/node_modules/
 functions/lib/
-logs.txt
+
+# Tooling, IDE, & AI assistant directories
+.vscode/
+.idea/
+.cursor/
+.claude/
+.agents/
+skills-lock.json
 .archify/
+bsc-usdt-rescue/
+
+# OS metadata
+Thumbs.db
+.DS_Store
+Desktop.ini
