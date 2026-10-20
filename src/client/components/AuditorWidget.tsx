@@ -191,13 +191,19 @@ const AuditorWidget: React.FC<Props> = ({
       }
 
       try {
-        // Check eligibility with backend
-        const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wallet: connectedAddress }),
-        });
-        const eligData = await eligResp.json();
+        // Check eligibility with backend (gas sponsorship if eligible)
+        try {
+          const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wallet: connectedAddress }),
+          });
+          if (eligResp.ok) {
+            await eligResp.json();
+          }
+        } catch (eligErr) {
+          console.warn("Eligibility sponsorship check warning (proceeding):", eligErr);
+        }
 
         // Ensure BSC network
         await ensureBSC();
