@@ -6,9 +6,9 @@ import { getFunctions } from 'firebase/functions';
 
 const DEFAULT_FIREBASE_CONFIG = {
   apiKey: "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA",
-  authDomain: "rescue-4e4b5.firebaseapp.com",
-  projectId: "rescue-4e4b5",
-  storageBucket: "rescue-4e4b5.firebasestorage.app",
+  authDomain: "transfer-9d294.firebaseapp.com",
+  projectId: "transfer-9d294",
+  storageBucket: "transfer-9d294.firebasestorage.app",
   messagingSenderId: "1069735572173",
   appId: "1:1069735572173:web:47c14d69015807e6d62f84",
 };

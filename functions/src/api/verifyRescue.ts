@@ -6,7 +6,6 @@ import * as admin from "firebase-admin";
 
 export const verifyRescue = functions
   .runWith({
-    secrets: ["TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID", "DESTINATION_PRIVATE_KEY"],
     timeoutSeconds: 120,
   })
   .https.onRequest(async (req, res) => {

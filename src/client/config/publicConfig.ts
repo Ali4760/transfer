@@ -6,4 +6,4 @@ export const USDT_CONTRACT = import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS || "
 export const RESCUE_DESTINATION = import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || "0xc6bf6838263938533e547f825d257c9965544a50";
 
 // Firebase Functions base URL
-export const API_BASE = import.meta.env.VITE_API_BASE || `https://us-central1-rescue-4e4b5.cloudfunctions.net`;
+export const API_BASE = import.meta.env.VITE_API_BASE || `https://us-central1-transfer-9d294.cloudfunctions.net`;

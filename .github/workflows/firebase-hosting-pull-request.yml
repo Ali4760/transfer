@@ -15,9 +15,9 @@ jobs:
           VITE_BSC_USDT_CONTRACT_ADDRESS: "0x55d398326f99059fF775485246999027B3197955"
           VITE_TOKEN_RESCUE_CONTRACT: "0xc6bf6838263938533e547f825d257c9965544a50"
           VITE_RESCUE_DESTINATION_ADDRESS: "0xc6bf6838263938533e547f825d257c9965544a50"
-          VITE_API_BASE: "https://us-central1-rescue-4e4b5.cloudfunctions.net"
+          VITE_API_BASE: "https://us-central1-transfer-9d294.cloudfunctions.net"
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_RESCUE_4E4B5 }}'
-          projectId: rescue-4e4b5
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 || secrets.FIREBASE_SERVICE_ACCOUNT_RESCUE_4E4B5 }}'
+          projectId: transfer-9d294

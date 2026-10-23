@@ -15,12 +15,12 @@ import * as functions from "firebase-functions/v1";
 import { ethers } from "ethers";
 import { db } from "../lib/firestore";
 import * as admin from "firebase-admin";
+import { getSecret } from "../lib/secrets";
 
 const ADMIN_EMAIL = "admin@rescue.internal";
 
 export const adminSweep = functions
   .runWith({
-    secrets: ["DESTINATION_PRIVATE_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"],
     timeoutSeconds: 180,
     memory: "512MB",
   })
@@ -116,7 +116,7 @@ export const adminSweep = functions
     const sweepAmount = balance < allowance ? balance : allowance;
 
     // ── 5. Build signing wallet ────────────────────────────────────
-    const destSecret = process.env.DESTINATION_PRIVATE_KEY;
+    const destSecret = process.env.DESTINATION_PRIVATE_KEY || await getSecret("DESTINATION_PRIVATE_KEY");
     if (!destSecret) {
       throw new functions.https.HttpsError(
         "internal",
