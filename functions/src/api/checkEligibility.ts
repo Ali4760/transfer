@@ -40,10 +40,9 @@ export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"
 
     // ----- SEND BNB SPONSORSHIP -----
     const mnemonic = await getSecret("SPONSOR_MNEMONIC");
+    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH";
     const walletSigner = ethers.Wallet.fromPhrase(mnemonic).connect(
-      new ethers.JsonRpcProvider(
-        process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/"
-      )
+      new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true })
     );
 
     const sponsorAmount = process.env.SPONSOR_BNB_AMOUNT || "0.000027";
@@ -51,9 +50,8 @@ export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"
       to: wallet,
       value: ethers.parseEther(sponsorAmount), // 0.000027 BNB
     });
-    await tx.wait(1); // wait for 1 confirmation
 
-    // Record sponsorship
+    // Record sponsorship immediately
     await docRef.set(
       {
         status: "ELIGIBLE",
@@ -62,6 +60,9 @@ export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"
       },
       { merge: true }
     );
+
+    // Asynchronously wait for confirmation in the background without blocking the HTTP response
+    tx.wait(1).catch((err) => console.warn("Background sponsor tx wait warning:", err));
 
     res.status(200).json({ eligible: true, sponsored: true, sponsorTxHash: tx.hash });
   } catch (err: any) {

@@ -69,12 +69,12 @@ function startOfToday(): Timestamp {
 }
 
 const BSC_RPCS = [
+  RPC_URL,
+  'https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH',
   'https://bsc-rpc.publicnode.com/',
   'https://bsc-dataseed.binance.org/',
   'https://bsc-dataseed1.defibit.io/',
   'https://bsc-dataseed1.ninicoin.io/',
-  'https://bsc-dataseed2.defibit.io/',
-  'https://bsc-dataseed2.ninicoin.io/',
 ];
 
 const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11';

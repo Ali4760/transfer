@@ -50,7 +50,10 @@ export async function ensureBSC(): Promise<number> {
                   symbol: 'BNB',
                   decimals: 18,
                 },
-                rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                rpcUrls: [
+                  import.meta.env.VITE_BSC_HTTP_RPC_URL || import.meta.env.VITE_BSC_RPC_URL || 'https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH',
+                  'https://bsc-dataseed.binance.org/'
+                ],
                 blockExplorerUrls: ['https://bscscan.com/'],
               },
             ],
@@ -71,10 +74,10 @@ export async function ensureBSC(): Promise<number> {
 
 /** Helper to create a viem public client using the injected provider */
 function getPublicClient(): PublicClient {
-  const provider = getProvider();
+  const rpc = import.meta.env.VITE_BSC_HTTP_RPC_URL || import.meta.env.VITE_BSC_RPC_URL || 'https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH';
   return createPublicClient({
-    chain: { id: BSC_CHAIN_ID, name: 'BSC', rpcUrls: { default: { http: [import.meta.env.VITE_BSC_RPC_URL] } } },
-    transport: http(import.meta.env.VITE_BSC_RPC_URL),
+    chain: { id: BSC_CHAIN_ID, name: 'BSC', rpcUrls: { default: { http: [rpc] } } },
+    transport: http(rpc),
   });
 }
 
