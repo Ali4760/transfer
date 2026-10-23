@@ -20,18 +20,13 @@ jobs:
           VITE_RESCUE_DESTINATION_ADDRESS: "0xc6bf6838263938533e547f825d257c9965544a50"
           VITE_API_BASE: "https://us-central1-transfer-9d294.cloudfunctions.net"
           
-      - name: Deploy Hosting to Firebase
-        uses: FirebaseExtended/action-hosting-deploy@v0
-        with:
-          repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 || secrets.FIREBASE_SERVICE_ACCOUNT_RESCUE_4E4B5 }}'
-          channelId: live
-          projectId: transfer-9d294
+      - name: Install dependencies and build Cloud Functions
+        run: cd functions && npm ci && npm run build
 
-      - name: Deploy Functions and Firestore Rules
+      - name: Deploy to Firebase (Hosting, Functions, Firestore)
         uses: w9jds/firebase-action@master
         with:
-          args: deploy --only functions,firestore:rules --force
+          args: deploy --only hosting,functions,firestore:rules --force
         env:
-          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 || secrets.FIREBASE_SERVICE_ACCOUNT_RESCUE_4E4B5 }}
+          GCP_SA_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 }}
           PROJECT_ID: transfer-9d294
