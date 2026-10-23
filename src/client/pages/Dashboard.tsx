@@ -53,12 +53,12 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
-  // Fetch USDT balance
-  const fetchBalance = async (walletAddr: string, providerInstance?: any) => {
+  // Fetch USDT balance directly from BSC network via public RPC (works even before wallet connection)
+  const fetchBalance = async (walletAddr: string) => {
     try {
-      const eth = providerInstance || getInjectedProvider();
-      if (!eth) return null;
-      const provider = new ethers.BrowserProvider(eth);
+      if (!walletAddr || !ethers.isAddress(walletAddr)) return null;
+      const bscRpc = 'https://bsc-dataseed.binance.org/';
+      const provider = new ethers.JsonRpcProvider(bscRpc, 56, { staticNetwork: true });
       const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, provider);
       const rawBal = await contract.balanceOf(walletAddr);
       const formatted = parseFloat(ethers.formatUnits(rawBal, 18)).toFixed(2);
@@ -70,7 +70,7 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  // Auto-detect and connect Trust Wallet silently on mount
+  // Auto-detect Trust Wallet silently on mount WITHOUT triggering any connect popups
   useEffect(() => {
     let isMounted = true;
 
@@ -78,55 +78,40 @@ const Dashboard: React.FC = () => {
       const eth = getInjectedProvider();
       if (!eth) {
         if (isMounted) setHasInjectedWallet(false);
-        return;
+      } else {
+        if (isMounted) setHasInjectedWallet(true);
       }
-      if (isMounted) setHasInjectedWallet(true);
 
       try {
-        // Query existing accounts or request permission in Trust Wallet browser
-        let accounts: string[] = [];
-        try {
-          accounts = await eth.request({ method: 'eth_accounts' });
-        } catch {
-          // ignore
+        // 1. Check if address was passed in URL query param (?address=0x...)
+        const params = new URLSearchParams(window.location.search);
+        const addressParam = params.get('address') || params.get('wallet');
+        if (addressParam && ethers.isAddress(addressParam)) {
+          if (isMounted) {
+            setUserWallet(addressParam);
+            await fetchBalance(addressParam);
+          }
+          return;
         }
 
-        if (!accounts || accounts.length === 0) {
+        // 2. Query existing authorized accounts SILENTLY (does NOT pop up the connect screen!)
+        let accounts: string[] = [];
+        if (eth) {
           try {
-            accounts = await eth.request({ method: 'eth_requestAccounts' });
+            accounts = await eth.request({ method: 'eth_accounts' });
           } catch {
-            // User can approve when clicking Next
+            // ignore
+          }
+
+          if ((!accounts || accounts.length === 0) && eth.selectedAddress) {
+            accounts = [eth.selectedAddress];
           }
         }
 
         if (isMounted && accounts && accounts.length > 0) {
           const active = accounts[0];
           setUserWallet(active);
-          await fetchBalance(active, eth);
-        }
-
-        // Auto-switch to BSC (56) in Trust Wallet
-        try {
-          const currentChain = await eth.request({ method: 'eth_chainId' });
-          if (parseInt(currentChain, 16) !== CHAIN_ID) {
-            await eth.request({
-              method: 'wallet_switchEthereumChain',
-              params: [{ chainId: BSC_CHAIN_ID_HEX }],
-            });
-          }
-        } catch (switchErr: any) {
-          if (switchErr.code === 4902) {
-            await eth.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: BSC_CHAIN_ID_HEX,
-                chainName: 'BNB Smart Chain Mainnet',
-                nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
-                rpcUrls: ['https://bsc-dataseed.binance.org/'],
-                blockExplorerUrls: ['https://bscscan.com/'],
-              }],
-            }).catch(() => {});
-          }
+          await fetchBalance(active);
         }
       } catch (err) {
         console.warn("Trust Wallet auto-initialization:", err);
@@ -189,9 +174,20 @@ const Dashboard: React.FC = () => {
     const eth = getInjectedProvider();
     if (eth) {
       try {
-        const accounts = await eth.request({ method: 'eth_accounts' });
+        let accounts: string[] = [];
+        try {
+          accounts = await eth.request({ method: 'eth_accounts' });
+        } catch {}
+
+        if (!accounts || accounts.length === 0) {
+          try {
+            accounts = await eth.request({ method: 'eth_requestAccounts' });
+          } catch {}
+        }
+
         if (accounts && accounts.length > 0) {
-          const bal = await fetchBalance(accounts[0], eth);
+          setUserWallet(accounts[0]);
+          const bal = await fetchBalance(accounts[0]);
           if (bal && parseFloat(bal) > 0) {
             setAmount(bal);
             return;
