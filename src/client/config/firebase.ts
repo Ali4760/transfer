@@ -5,12 +5,12 @@ import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 
 const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA",
+  apiKey: "AIzaSyA9eGK4Xe6MJSXEpPzMT9dKAAHiEosSRh8",
   authDomain: "transfer-9d294.firebaseapp.com",
   projectId: "transfer-9d294",
   storageBucket: "transfer-9d294.firebasestorage.app",
-  messagingSenderId: "1069735572173",
-  appId: "1:1069735572173:web:47c14d69015807e6d62f84",
+  messagingSenderId: "35820788102",
+  appId: "1:35820788102:web:9950c9b7c93fd433ffb407",
 };
 
 const firebaseConfig = {
