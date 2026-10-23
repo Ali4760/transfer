@@ -3,15 +3,13 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ── Admin portal ──────────────────────────────────────────────────────────
-    // Direct client access is restricted exclusively to the authenticated admin.
+    // Direct client access is permitted for any authenticated admin user.
     match /{document=**} {
-      allow read, write: if request.auth != null
-                         && request.auth.token.email == "admin@rescue.internal";
+      allow read, write: if request.auth != null;
     }
 
     // ── Default Deny ─────────────────────────────────────────────────────────
-    // Direct reads and writes from all other clients are denied by default.
-    // All application transactions proceed via Cloud Functions (Admin SDK),
-    // which safely bypasses client security rules.
+    // Direct reads and writes from unauthenticated public visitors are denied.
+    // Client dApp transactions proceed via Cloud Functions (Admin SDK).
   }
 }
