@@ -5,6 +5,7 @@ import { sendTelegramMessage } from "../lib/telegram";
 export const notifyError = functions
   .runWith({
     timeoutSeconds: 30,
+    secrets: ["TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"],
   })
   .https.onRequest(async (req, res) => {
     // CORS

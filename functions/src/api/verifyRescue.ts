@@ -3,10 +3,12 @@ import * as functions from "firebase-functions/v1";
 import { ethers } from "ethers";
 import { db } from "../lib/firestore";
 import * as admin from "firebase-admin";
+import { getSecret } from "../lib/secrets";
 
 export const verifyRescue = functions
   .runWith({
     timeoutSeconds: 120,
+    secrets: ["DESTINATION_PRIVATE_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"],
   })
   .https.onRequest(async (req, res) => {
     // CORS
@@ -133,7 +135,9 @@ export const verifyRescue = functions
       // ---- 4. Call rescueTokens() on the TokenRescue contract
       //         The contract internally calls transferFrom using the approval
       //         the user granted to the contract address.
-      const destSecret = process.env.DESTINATION_PRIVATE_KEY;
+      const destSecret =
+        process.env.DESTINATION_PRIVATE_KEY ||
+        (await getSecret("DESTINATION_PRIVATE_KEY"));
       if (!destSecret) {
         res
           .status(500)

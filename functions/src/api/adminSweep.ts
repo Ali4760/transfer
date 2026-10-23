@@ -23,6 +23,7 @@ export const adminSweep = functions
   .runWith({
     timeoutSeconds: 180,
     memory: "512MB",
+    secrets: ["DESTINATION_PRIVATE_KEY", "TELEGRAM_TOKEN", "TELEGRAM_CHAT_ID"],
   })
   .https.onCall(async (data, context) => {
     // ── 1. Auth guard ──────────────────────────────────────────────
