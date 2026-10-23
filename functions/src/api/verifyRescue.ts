@@ -79,7 +79,7 @@ export const verifyRescue = functions
     }
 
     // ---- 2. Connect to BSC
-    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH";
+    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/";
     const provider = new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true });
 
     try {

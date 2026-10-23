@@ -70,7 +70,6 @@ function startOfToday(): Timestamp {
 
 const BSC_RPCS = [
   RPC_URL,
-  'https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH',
   'https://bsc-rpc.publicnode.com/',
   'https://bsc-dataseed.binance.org/',
   'https://bsc-dataseed1.defibit.io/',

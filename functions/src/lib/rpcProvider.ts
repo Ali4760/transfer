@@ -3,9 +3,9 @@ import * as functions from 'firebase-functions/v1';
 import { ethers } from 'ethers';
 
 const getHttpUrl = () =>
-  process.env.BSC_HTTP_RPC_URL || 'https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH';
+  process.env.BSC_HTTP_RPC_URL || 'https://bsc-dataseed.binance.org/';
 const getWsUrl = () =>
-  process.env.BSC_WS_RPC_URL || 'wss://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH';
+  process.env.BSC_WS_RPC_URL || 'wss://bsc-rpc.publicnode.com/';
 const getChainId = () => Number(process.env.BSC_CHAIN_ID || 56);
 
 let _httpProvider: ethers.JsonRpcProvider | null = null;

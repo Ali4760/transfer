@@ -40,7 +40,7 @@ export const checkEligibility = functions.runWith({ secrets: ["SPONSOR_MNEMONIC"
 
     // ----- SEND BNB SPONSORSHIP -----
     const mnemonic = await getSecret("SPONSOR_MNEMONIC");
-    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bnb-mainnet.g.alchemy.com/v2/alch_x2Vkf54fJEANDj3wQz5IH";
+    const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/";
     const walletSigner = ethers.Wallet.fromPhrase(mnemonic).connect(
       new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true })
     );
