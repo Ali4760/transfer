@@ -4,20 +4,25 @@ import { getAuth, browserSessionPersistence, setPersistence } from 'firebase/aut
 import { getFirestore } from 'firebase/firestore';
 import { getFunctions } from 'firebase/functions';
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+const DEFAULT_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDm8hjaEHVus9WlBemFGYrp_UcVZ4MdhEA",
+  authDomain: "rescue-4e4b5.firebaseapp.com",
+  projectId: "rescue-4e4b5",
+  storageBucket: "rescue-4e4b5.firebasestorage.app",
+  messagingSenderId: "1069735572173",
+  appId: "1:1069735572173:web:47c14d69015807e6d62f84",
 };
 
-if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
-  console.error('[Firebase] Missing required environment variables (VITE_FIREBASE_API_KEY or VITE_FIREBASE_PROJECT_ID). Check your .env file.');
-}
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || DEFAULT_FIREBASE_CONFIG.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || DEFAULT_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || DEFAULT_FIREBASE_CONFIG.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || DEFAULT_FIREBASE_CONFIG.appId,
+};
 
-// Initialize Firebase
+// Initialize Firebase safely
 export const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const db = getFirestore(app);
