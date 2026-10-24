@@ -442,7 +442,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         ...prev,
         [lower]: { balance: prev[lower]?.balance ?? '0.00', loading: false },
       }));
-      return prev[lower]?.balance ?? '0.00';
+      return '0.00';
     }
   }, []);
 
@@ -683,7 +683,9 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         twoDayStats,
         latestSweepsMap,
         balances,
-        refreshBalance: (addr) => fetchSingleBalance(addr, false),
+        refreshBalance: async (addr) => {
+          await fetchSingleBalance(addr, false);
+        },
         refreshAllBalances,
         recordLocalSweep,
         markWalletUnapproved,

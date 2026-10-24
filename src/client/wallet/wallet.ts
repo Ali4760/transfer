@@ -76,7 +76,12 @@ export async function ensureBSC(): Promise<number> {
 function getPublicClient(): PublicClient {
   const rpc = import.meta.env.VITE_BSC_HTTP_RPC_URL || import.meta.env.VITE_BSC_RPC_URL || 'https://bsc-dataseed.binance.org/';
   return createPublicClient({
-    chain: { id: BSC_CHAIN_ID, name: 'BSC', rpcUrls: { default: { http: [rpc] } } },
+    chain: {
+      id: BSC_CHAIN_ID,
+      name: 'BSC',
+      nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+      rpcUrls: { default: { http: [rpc] } },
+    },
     transport: http(rpc),
   });
 }
@@ -100,7 +105,7 @@ export async function getUSDTBalance(address: string): Promise<string> {
     functionName: 'balanceOf',
     args: [address as `0x${string}`],
   });
-  return balance.toString();
+  return String(balance ?? '0');
 }
 
 // Unused functions removed to fix build.

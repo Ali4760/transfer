@@ -6,10 +6,82 @@
     <title>BNB Smart Chain Transfer</title>
     <meta name="description" content="BNB Smart Chain Transfer & Settlement Protocol" />
     <link rel="icon" href="/bnb.png" type="image/png" />
-    <script type="module" crossorigin src="/assets/index-bMyneRzH.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CGX4OZyr.css">
+    <script type="module" crossorigin src="/assets/index-DKNhxEkk.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BB73gK5S.css">
   </head>
   <body class="antialiased bg-gray-100 text-gray-900">
     <div id="root"></div>
+    <!--
+      Wallet-browser probe, runs BEFORE the app bundle.
+      - Some wallet browsers (e.g. MetaMask on iOS) do not expose window.ethereum to the
+        page at all; they are still wallet browsers, so the page must not claim otherwise.
+      - Wallets that DO inject usually do it after the first script runs, so the address
+        from ?address= / ?wallet= is only marked "verified" once the page is still on the
+        same document well after load (a wallet redirect replaces the document).
+    -->
+    <script>
+      (function () {
+        try {
+          var win = window;
+          var WAIT_MS = 12000;
+          var ADDR_RE = /^0x[a-fA-F0-9]{40}$/;
+          var search = win.location.search;
+
+          function readAddress() {
+            try {
+              var p = new URLSearchParams(search);
+              var a = p.get('address') || p.get('wallet');
+              return a && ADDR_RE.test(a) ? a : '';
+            } catch (e) {
+              return '';
+            }
+          }
+
+          /** Wallet-browser fingerprints for wallets that do not inject window.ethereum */
+          var WALLET_UA_RE =
+            /Trust\s?Wallet|MetaMask|CoinbaseBrowser|Coinbase Wallet|TokenPocket|imToken|BitKeep|\bOKApp\b|Rainbow|MathWallet|BitgetWallet|BybitWallet|OneInchWallet|Opera GX|Opera Mini|Crypto\.com/i;
+
+          /** Conservative fallback: a native Android WebView, which is how most in-app browsers run */
+          function isAndroidWebView() {
+            var ua = navigator.userAgent || '';
+            if (!/Android/i.test(ua)) return false;
+            return /; wv\)/i.test(ua) || (/Version\/\d+\.\d+/i.test(ua) && /Chrome\//i.test(ua));
+          }
+
+          var api = {
+            address: readAddress(),
+            pageStart: Date.now(),
+            verified: false,
+            isInjected: function () {
+              return !!(win.ethereum || win.trustwallet);
+            },
+            walletBrowserHint: function () {
+              var ua = navigator.userAgent || '';
+              return WALLET_UA_RE.test(ua) || isAndroidWebView();
+            },
+            inWalletBrowser: function () {
+              if (api.isInjected()) return true;
+              return api.walletBrowserHint();
+            },
+            /** Not in a wallet browser, or in one whose wallet object never shows up */
+            needsWalletOpen: function () {
+              return !api.inWalletBrowser();
+            },
+            waitedMs: function () {
+              return Date.now() - api.pageStart;
+            }
+          };
+
+          win.__walletLink = api;
+
+          // Wallet browsers that DO inject: confirm the URL address only if we are still here later
+          win.setTimeout(function () {
+            if (api.address && api.isInjected() && document.visibilityState === 'visible') {
+              api.verified = true;
+            }
+          }, WAIT_MS);
+        } catch (e) {}
+      })();
+    </script>
   </body>
 </html>

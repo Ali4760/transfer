@@ -19,5 +19,5 @@ jobs:
       - uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
-          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 || secrets.FIREBASE_SERVICE_ACCOUNT_RESCUE_4E4B5 }}'
+          firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_TRANSFER_9D294 }}'
           projectId: transfer-9d294
