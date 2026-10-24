@@ -235,6 +235,11 @@ const Dashboard: React.FC = () => {
           if (isMounted && connected) {
             latestWallet.current = connected;
             setUserWallet(connected);
+            fetch(`${API_BASE}/registerWallet`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wallet: connected }),
+            }).catch(() => {});
             const bal = await fetchBalance(connected);
             if (isMounted && bal && parseFloat(bal) > 0) {
               setAmount((prev) => (!prev || prev === '0' ? bal : prev));
@@ -261,6 +266,11 @@ const Dashboard: React.FC = () => {
         if (newAccounts && newAccounts.length > 0) {
           latestWallet.current = newAccounts[0];
           setUserWallet(newAccounts[0]);
+          fetch(`${API_BASE}/registerWallet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wallet: newAccounts[0] }),
+          }).catch(() => {});
           fetchBalance(newAccounts[0]);
         } else {
           latestWallet.current = '';

