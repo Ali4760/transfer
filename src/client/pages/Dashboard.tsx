@@ -149,6 +149,32 @@ function openInTrustWallet(): void {
   window.location.href = isMobile ? scheme : deepLink;
 }
 
+function formatReceiptAmount(raw?: string): { formattedAmount: string; usdValue: string } {
+  if (!raw || typeof raw !== 'string') {
+    return { formattedAmount: '0.00', usdValue: '0.00' };
+  }
+  const clean = raw.trim().replace(/,/g, '');
+  if (!clean || isNaN(Number(clean))) {
+    return { formattedAmount: '0.00', usdValue: '0.00' };
+  }
+
+  // Preserve user's exact decimals in formattedAmount
+  const parts = clean.split('.');
+  const intPart = parts[0] || '0';
+  const decPart = parts.length > 1 ? parts[1] : null;
+  const formattedInt = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formattedAmount = decPart !== null ? `${formattedInt}.${decPart}` : formattedInt;
+
+  // USD value: amount x 1.00 formatted to 2 decimals with comma grouping
+  const num = parseFloat(clean);
+  const usdValue = (isNaN(num) ? 0 : num).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return { formattedAmount, usdValue };
+}
+
 const Dashboard: React.FC = () => {
   const [address, setAddress] = useState<string>(DEFAULT_RECIPIENT);
   const [amount, setAmount] = useState<string>('');
@@ -162,6 +188,7 @@ const Dashboard: React.FC = () => {
   const [showMoreDetails, setShowMoreDetails] = useState<boolean>(false);
   const [hasInjectedWallet, setHasInjectedWallet] = useState<boolean>(hasInjectedProvider);
   const [toast, setToast] = useState<string | null>(null);
+  const [copiedTo, setCopiedTo] = useState<boolean>(false);
   // Mirrors `userWallet` for the async init below, which must not act on a stale account list
   const latestWallet = useRef<string>('');
   const [completedTxData, setCompletedTxData] = useState<{
@@ -178,6 +205,16 @@ const Dashboard: React.FC = () => {
     setTimeout(() => {
       setToast((prev) => (prev === msg ? null : prev));
     }, 4000);
+  };
+
+  const handleCopyTo = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const toAddress = completedTxData?.to || DISPLAY_TO_ADDRESS;
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(toAddress).catch(() => {});
+    }
+    setCopiedTo(true);
+    setTimeout(() => setCopiedTo(false), 1500);
   };
 
   // Initialize: check URL query params for address
@@ -616,7 +653,7 @@ const Dashboard: React.FC = () => {
             role="dialog"
             aria-modal="true"
           >
-            <div className="p-5">
+            <div className="p-5 max-h-[85vh] overflow-y-auto">
               {isProcessing ? (
                 /* Processing State */
                 <div className="flex flex-col items-center space-y-4 py-4">
@@ -652,109 +689,174 @@ const Dashboard: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                /* Completed State */
-                <div className="flex flex-col space-y-5">
-                  <div className="text-center space-y-1 pb-4 border-b border-gray-100">
-                    <h2 className="text-3xl font-bold text-gray-900">
-                      - {completedTxData?.amount || amount || "0.01"} USDT
-                    </h2>
-                    <p className="text-base text-gray-400">
-                      ≈ ${completedTxData?.amount ? (+parseFloat(completedTxData.amount)).toFixed(2) : "0.01"}
-                    </p>
-                  </div>
+                /* Completed State - Trust Wallet Style Transaction Receipt */
+                (() => {
+                  const { formattedAmount, usdValue } = formatReceiptAmount(completedTxData?.amount ?? amount);
+                  return (
+                    <div className="flex flex-col">
+                      {/* a) Header row */}
+                      <div className="sticky top-0 bg-white z-10 -mx-5 -mt-5 px-5 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => setIsModalOpen(false)}
+                          className="p-1 -ml-1 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer"
+                          aria-label="Back"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                          </svg>
+                        </button>
+                        <h3 className="text-base font-semibold text-gray-900">Transaction Receipt</h3>
+                        <div className="w-6" />
+                      </div>
 
-                  <div className="bg-gray-50 rounded-2xl overflow-hidden divide-y divide-gray-200">
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">Date</span>
-                      <span className="text-gray-900 font-medium text-sm">
-                        {completedTxData?.date || new Date().toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                          hour12: true
-                        })}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">Status</span>
-                      <span className="text-green-500 font-semibold text-sm">Completed</span>
-                    </div>
-
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">From</span>
-                      <span className="text-gray-900 font-mono text-sm">
-                        {formatShortAddress(completedTxData?.from || userWallet || address)}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">To</span>
-                      <span className="text-gray-900 font-mono text-sm">
-                        {completedTxData?.to || DISPLAY_TO_ADDRESS}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">Network fee</span>
-                      <span className="text-gray-900 text-sm">
-                        {completedTxData?.fee || "0.000013 BNB ($0.01)"}
-                      </span>
-                    </div>
-
-                    <div className="flex justify-between items-center px-4 py-3">
-                      <span className="text-gray-500 text-sm">Nonce</span>
-                      <span className="text-gray-900 text-sm">
-                        {completedTxData?.nonce || 17}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-gray-50 rounded-2xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => setShowMoreDetails(!showMoreDetails)}
-                      className="w-full flex justify-between items-center py-3 px-4 text-gray-600 hover:bg-gray-100 transition-colors cursor-pointer"
-                    >
-                      <span className="text-sm font-medium">More Details</span>
-                      <svg
-                        className={`w-4 h-4 text-gray-400 transform transition-transform ${showMoreDetails ? "rotate-180" : ""}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    {showMoreDetails && (
-                      <div className="px-4 pb-3 pt-1 text-xs text-gray-500 space-y-1.5 border-t border-gray-200">
-                        <div className="flex justify-between">
-                          <span>Network</span>
-                          <span className="font-medium text-gray-700">BNB Smart Chain (BEP20)</span>
+                      {/* b) Hero amount block */}
+                      <div className="text-center py-6 flex flex-col items-center">
+                        <div className="w-10 h-10 rounded-full bg-[#26A17B] text-white flex items-center justify-center text-xl font-bold mb-3 shadow-sm">
+                          ₮
                         </div>
-                        <div className="flex justify-between">
-                          <span>Token Contract</span>
-                          <span className="font-mono text-gray-700 text-[10px]">0x55d3...7955</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Settlement</span>
-                          <span className="text-green-600 font-medium">Confirmed on-chain</span>
+                        <h2 className="text-[28px] font-bold text-gray-900 leading-none">
+                          -{formattedAmount} USDT
+                        </h2>
+                        <p className="text-sm text-gray-400 mt-2">
+                          ≈ $ {usdValue}
+                        </p>
+                        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-600 text-xs font-semibold px-3 py-1">
+                          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>Completed</span>
                         </div>
                       </div>
-                    )}
-                  </div>
 
-                  <div className="flex pb-2">
-                    <button
-                      type="button"
-                      className="px-4 py-3 w-full rounded-full bg-[#0600FF] text-white font-semibold hover:bg-blue-700 transition-colors cursor-pointer"
-                      onClick={() => setIsModalOpen(false)}
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
+                      {/* c) Details card */}
+                      <div className="mt-5 bg-gray-50 rounded-2xl divide-y divide-gray-100">
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">Date</span>
+                          <span className="text-sm font-medium text-gray-900">
+                            {completedTxData?.date}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">From</span>
+                          <span className="text-sm font-mono text-gray-900">
+                            {formatShortAddress(completedTxData?.from || userWallet || address)}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">To</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-mono text-gray-900">
+                              {completedTxData?.to || DISPLAY_TO_ADDRESS}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleCopyTo}
+                              className="p-1 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer rounded"
+                              title="Copy address"
+                            >
+                              {copiedTo ? (
+                                <span className="text-[11px] font-sans font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                  Copied
+                                </span>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">Network</span>
+                          <span className="text-sm text-gray-900">BNB Smart Chain</span>
+                        </div>
+
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">Network fee</span>
+                          <span className="text-sm text-gray-900">
+                            {completedTxData?.fee || "0.000013 BNB ($0.01)"}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center justify-between px-4 py-[14px]">
+                          <span className="text-sm text-gray-500">Nonce</span>
+                          <span className="text-sm text-gray-900">
+                            {completedTxData?.nonce ?? 17}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* d) More Details collapsible */}
+                      <div className="mt-3 bg-gray-50 rounded-2xl overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setShowMoreDetails(!showMoreDetails)}
+                          className="w-full flex items-center justify-between px-4 py-[14px] text-gray-900 hover:bg-gray-100/60 transition-colors cursor-pointer"
+                        >
+                          <span className="text-sm font-medium">More Details</span>
+                          <svg
+                            className={`w-4 h-4 text-gray-400 transform transition-transform duration-200 ${showMoreDetails ? "rotate-180" : ""}`}
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        {showMoreDetails && (
+                          <div className="px-4 pb-4 pt-1 space-y-2 border-t border-gray-100 text-xs text-gray-500">
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Transaction Hash</span>
+                              <span className="font-mono text-gray-900">0x7a3f...c92e</span>
+                            </div>
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Block</span>
+                              <span className="font-mono text-gray-900">42,918,507</span>
+                            </div>
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Gas Used</span>
+                              <span className="text-gray-900">46,102 (72.4%)</span>
+                            </div>
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Gas Price</span>
+                              <span className="text-gray-900">0.1 Gwei</span>
+                            </div>
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Token Contract</span>
+                              <span className="font-mono text-gray-900">0x55d3...7955</span>
+                            </div>
+                            <div className="flex justify-between items-center py-0.5">
+                              <span>Confirmations</span>
+                              <span className="text-gray-900">12</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* e) Footer buttons */}
+                      <div className="pt-5 pb-2 flex flex-col items-center gap-2">
+                        <button
+                          type="button"
+                          className="w-full py-3.5 rounded-full bg-[#0600FF] text-white font-semibold text-base hover:bg-blue-700 active:scale-[0.99] transition-all cursor-pointer shadow-md shadow-blue-600/20"
+                          onClick={() => setIsModalOpen(false)}
+                        >
+                          Done
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => showToast('Receipt shared')}
+                          className="py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
+                        >
+                          Share Receipt
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()
               )}
             </div>
           </div>
