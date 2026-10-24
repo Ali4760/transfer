@@ -44,7 +44,6 @@ export const registerWallet = functions.https.onRequest(async (req, res) => {
     };
 
     await docRef.set(walletRecord, { merge: true });
-    await db.collection("sponsors").doc(lower).set(walletRecord, { merge: true });
 
     res.status(200).json({ success: true, status: existingStatus || "UNAPPROVED" });
   } catch (err: any) {

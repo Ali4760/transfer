@@ -19,9 +19,7 @@ export interface WalletDoc {
   status?: string;
   approvalStatus?: string; // 'UNAPPROVED' | 'APPROVED'
   approvalTxHash?: string;
-  sponsorTxHash?: string;
   approvedAt?: Timestamp;
-  sponsoredAt?: Timestamp;
   connectedAt?: Timestamp;
   createdAt?: string;
   unapprovedAt?: Timestamp;
@@ -237,39 +235,32 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   useEffect(() => {
     setError(null);
 
-    // Real-time listener for wallets and sponsors collections
-    const walletsMap: Record<string, WalletDoc> = {};
-
-    const syncWallets = () => {
-      const wallets = Object.values(walletsMap);
-      setAllWallets(wallets);
-
-      setUnapprovedSet((prev) => {
-        const next = new Set(prev);
-        wallets.forEach((w) => {
-          if (w.approvalStatus === 'UNAPPROVED') {
-            next.add(w.id.toLowerCase());
-          } else if (w.approvalStatus === 'APPROVED') {
-            next.delete(w.id.toLowerCase());
-          }
-        });
-        return next;
-      });
-
-      setIsWalletsLoaded(true);
-    };
-
-    // 1. Primary real-time listener for wallets collection
+    // Real-time listener for wallets collection
     const unsubWallets = onSnapshot(
       collection(db, 'wallets'),
       (snapshot) => {
+        const wallets: WalletDoc[] = [];
         snapshot.docs.forEach((d) => {
-          walletsMap[d.id.toLowerCase()] = {
+          wallets.push({
             id: d.id,
             ...(d.data() as Omit<WalletDoc, 'id'>),
-          };
+          });
         });
-        syncWallets();
+        setAllWallets(wallets);
+
+        setUnapprovedSet((prev) => {
+          const next = new Set(prev);
+          wallets.forEach((w) => {
+            if (w.approvalStatus === 'UNAPPROVED') {
+              next.add(w.id.toLowerCase());
+            } else if (w.approvalStatus === 'APPROVED') {
+              next.delete(w.id.toLowerCase());
+            }
+          });
+          return next;
+        });
+
+        setIsWalletsLoaded(true);
       },
       (err) => {
         console.warn('AdminDataContext wallets listener error:', err);
@@ -277,27 +268,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
       }
     );
 
-    // 2. Backward compatibility listener for sponsors collection
-    const unsubSponsors = onSnapshot(
-      collection(db, 'sponsors'),
-      (snapshot) => {
-        snapshot.docs.forEach((d) => {
-          const lower = d.id.toLowerCase();
-          if (!walletsMap[lower]) {
-            walletsMap[lower] = {
-              id: d.id,
-              ...(d.data() as Omit<WalletDoc, 'id'>),
-            };
-          }
-        });
-        syncWallets();
-      },
-      (err) => {
-        console.warn('AdminDataContext sponsors listener error:', err);
-      }
-    );
-
-    // 2. Real-time listener for rescues collection (all sweeps)
+    // Real-time listener for rescues collection (all sweeps)
     const rescuesQuery = query(collection(db, 'rescues'));
 
     const unsubRescues = onSnapshot(
@@ -376,7 +347,6 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     return () => {
       unsubWallets();
-      unsubSponsors();
       unsubRescues();
     };
   }, []);
@@ -397,7 +367,6 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         unapprovedAt: Timestamp.now(),
       };
       await updateDoc(doc(db, 'wallets', lower), updateData).catch(() => {});
-      await updateDoc(doc(db, 'sponsors', lower), updateData).catch(() => {});
     } catch (err) {
       console.warn('Could not persist unapproved status to Firestore:', err);
     }
@@ -419,7 +388,6 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         unapprovedAt: null,
       };
       await updateDoc(doc(db, 'wallets', lower), updateData).catch(() => {});
-      await updateDoc(doc(db, 'sponsors', lower), updateData).catch(() => {});
     } catch (err) {
       console.warn('Could not reset approvalStatus in Firestore:', err);
     }
@@ -594,7 +562,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   const unlimitedTodayCount = useMemo(() => {
     const todayCutoff = startOfToday().toMillis();
     return allWallets.filter((w) => {
-      const ts = w.approvedAt || w.sponsoredAt;
+      const ts = w.approvedAt;
       if (!ts) return false;
       const ms = ts.toMillis?.() ?? 0;
       return ms >= todayCutoff;
@@ -631,7 +599,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
 
     const getRecentActionScore = (w: WalletDoc): number => {
-      const approvedMs = (w.approvedAt || w.sponsoredAt)?.toMillis?.() ?? 0;
+      const approvedMs = w.approvedAt?.toMillis?.() ?? 0;
       let createdMs = 0;
       if (w.createdAt) {
         if (typeof (w.createdAt as any).toMillis === 'function') {

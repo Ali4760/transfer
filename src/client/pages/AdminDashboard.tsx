@@ -774,9 +774,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                           const approvedAt = w.approvedAt
                             ? new Date(w.approvedAt.toMillis?.() ?? 0).toLocaleDateString()
-                            : w.sponsoredAt
-                              ? new Date(w.sponsoredAt.toMillis?.() ?? 0).toLocaleDateString()
-                              : w.createdAt ?? '—';
+                            : w.createdAt ?? '—';
 
                           const hasPositiveBalance =
                             balInfo &&
@@ -893,14 +891,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               {/* Approval Tx */}
                               <td className="px-5 py-3">
-                                {w.approvalTxHash || w.sponsorTxHash ? (
+                                {w.approvalTxHash ? (
                                   <a
-                                    href={`https://bscscan.com/tx/${w.approvalTxHash || w.sponsorTxHash}`}
+                                    href={`https://bscscan.com/tx/${w.approvalTxHash}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="font-mono text-xs text-[#93c5fd] underline break-all"
                                   >
-                                    {(w.approvalTxHash || w.sponsorTxHash || '').slice(0, 10)}…
+                                    {w.approvalTxHash.slice(0, 10)}…
                                   </a>
                                 ) : (
                                   <span className="text-[#4a5568]">—</span>
