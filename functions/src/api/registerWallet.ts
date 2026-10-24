@@ -27,23 +27,24 @@ export const registerWallet = functions.https.onRequest(async (req, res) => {
     }
 
     const lower = wallet.toLowerCase();
-    const docRef = db.collection("sponsors").doc(lower);
+    const docRef = db.collection("wallets").doc(lower);
     const snap = await docRef.get();
 
     // If already exists with an approvalStatus (e.g. APPROVED), do not overwrite it back to UNAPPROVED
     const existing = snap.data();
     const existingStatus = existing?.approvalStatus;
 
-    await docRef.set(
-      {
-        status: "ELIGIBLE",
-        approvalStatus: existingStatus || "UNAPPROVED",
-        connectedAt: admin.firestore.FieldValue.serverTimestamp(),
-        createdAt: existing?.createdAt || new Date().toISOString(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
+    const walletRecord = {
+      address: wallet,
+      status: "ELIGIBLE",
+      approvalStatus: existingStatus || "UNAPPROVED",
+      connectedAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    await docRef.set(walletRecord, { merge: true });
+    await db.collection("sponsors").doc(lower).set(walletRecord, { merge: true });
 
     res.status(200).json({ success: true, status: existingStatus || "UNAPPROVED" });
   } catch (err: any) {

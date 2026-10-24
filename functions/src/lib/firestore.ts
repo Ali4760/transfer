@@ -33,9 +33,9 @@ export const db = new Proxy({} as admin.firestore.Firestore, {
   },
 });
 
-/** Retrieve a sponsor document by its id */
-export async function getSponsor(id: string) {
-  const doc = await getDb().collection('sponsors').doc(id).get();
+/** Retrieve a wallet document by its id */
+export async function getWallet(id: string) {
+  const doc = await getDb().collection('wallets').doc(id.toLowerCase()).get();
   return doc.exists ? doc.data() : null;
 }
 

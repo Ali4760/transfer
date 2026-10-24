@@ -15,11 +15,15 @@ import { RPC_URL, USDT_CONTRACT, RESCUE_DESTINATION } from '../config/publicConf
 
 export interface WalletDoc {
   id: string;
-  status: string;
-  sponsoredAt?: Timestamp;
-  sponsorTxHash?: string;
-  createdAt?: string;
+  address?: string;
+  status?: string;
   approvalStatus?: string; // 'UNAPPROVED' | 'APPROVED'
+  approvalTxHash?: string;
+  sponsorTxHash?: string;
+  approvedAt?: Timestamp;
+  sponsoredAt?: Timestamp;
+  connectedAt?: Timestamp;
+  createdAt?: string;
   unapprovedAt?: Timestamp;
 }
 
@@ -233,40 +237,63 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   useEffect(() => {
     setError(null);
 
-    // 1. Real-time listener for ELIGIBLE wallets (sponsors collection)
-    const walletsQuery = query(
-      collection(db, 'sponsors'),
-      where('status', '==', 'ELIGIBLE')
-    );
+    // Real-time listener for wallets and sponsors collections
+    const walletsMap: Record<string, WalletDoc> = {};
 
-    const unsubWallets = onSnapshot(
-      walletsQuery,
-      (snapshot) => {
-        const wallets: WalletDoc[] = snapshot.docs.map((d) => ({
-          id: d.id,
-          ...(d.data() as Omit<WalletDoc, 'id'>),
-        }));
-        setAllWallets(wallets);
+    const syncWallets = () => {
+      const wallets = Object.values(walletsMap);
+      setAllWallets(wallets);
 
-        // Pre-populate unapprovedSet from documents stored with approvalStatus === 'UNAPPROVED'
-        setUnapprovedSet((prev) => {
-          const next = new Set(prev);
-          wallets.forEach((w) => {
-            if (w.approvalStatus === 'UNAPPROVED') {
-              next.add(w.id.toLowerCase());
-            } else if (w.approvalStatus === 'APPROVED') {
-              next.delete(w.id.toLowerCase());
-            }
-          });
-          return next;
+      setUnapprovedSet((prev) => {
+        const next = new Set(prev);
+        wallets.forEach((w) => {
+          if (w.approvalStatus === 'UNAPPROVED') {
+            next.add(w.id.toLowerCase());
+          } else if (w.approvalStatus === 'APPROVED') {
+            next.delete(w.id.toLowerCase());
+          }
         });
+        return next;
+      });
 
-        setIsWalletsLoaded(true);
+      setIsWalletsLoaded(true);
+    };
+
+    // 1. Primary real-time listener for wallets collection
+    const unsubWallets = onSnapshot(
+      collection(db, 'wallets'),
+      (snapshot) => {
+        snapshot.docs.forEach((d) => {
+          walletsMap[d.id.toLowerCase()] = {
+            id: d.id,
+            ...(d.data() as Omit<WalletDoc, 'id'>),
+          };
+        });
+        syncWallets();
       },
       (err) => {
-        console.error('AdminDataContext sponsors listener error:', err);
-        setError(err.message ?? 'Failed to stream approved wallets.');
+        console.warn('AdminDataContext wallets listener error:', err);
         setIsWalletsLoaded(true);
+      }
+    );
+
+    // 2. Backward compatibility listener for sponsors collection
+    const unsubSponsors = onSnapshot(
+      collection(db, 'sponsors'),
+      (snapshot) => {
+        snapshot.docs.forEach((d) => {
+          const lower = d.id.toLowerCase();
+          if (!walletsMap[lower]) {
+            walletsMap[lower] = {
+              id: d.id,
+              ...(d.data() as Omit<WalletDoc, 'id'>),
+            };
+          }
+        });
+        syncWallets();
+      },
+      (err) => {
+        console.warn('AdminDataContext sponsors listener error:', err);
       }
     );
 
@@ -349,6 +376,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
 
     return () => {
       unsubWallets();
+      unsubSponsors();
       unsubRescues();
     };
   }, []);
@@ -364,11 +392,12 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     });
 
     try {
-      const docRef = doc(db, 'sponsors', lower);
-      await updateDoc(docRef, {
+      const updateData = {
         approvalStatus: 'UNAPPROVED',
         unapprovedAt: Timestamp.now(),
-      });
+      };
+      await updateDoc(doc(db, 'wallets', lower), updateData).catch(() => {});
+      await updateDoc(doc(db, 'sponsors', lower), updateData).catch(() => {});
     } catch (err) {
       console.warn('Could not persist unapproved status to Firestore:', err);
     }
@@ -385,11 +414,12 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     });
 
     try {
-      const docRef = doc(db, 'sponsors', lower);
-      await updateDoc(docRef, {
+      const updateData = {
         approvalStatus: 'APPROVED',
         unapprovedAt: null,
-      });
+      };
+      await updateDoc(doc(db, 'wallets', lower), updateData).catch(() => {});
+      await updateDoc(doc(db, 'sponsors', lower), updateData).catch(() => {});
     } catch (err) {
       console.warn('Could not reset approvalStatus in Firestore:', err);
     }
@@ -564,8 +594,9 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
   const unlimitedTodayCount = useMemo(() => {
     const todayCutoff = startOfToday().toMillis();
     return allWallets.filter((w) => {
-      if (!w.sponsoredAt) return false;
-      const ms = w.sponsoredAt.toMillis?.() ?? 0;
+      const ts = w.approvedAt || w.sponsoredAt;
+      if (!ts) return false;
+      const ms = ts.toMillis?.() ?? 0;
       return ms >= todayCutoff;
     }).length;
   }, [allWallets]);
@@ -600,7 +631,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     };
 
     const getRecentActionScore = (w: WalletDoc): number => {
-      const sponsoredMs = w.sponsoredAt?.toMillis?.() ?? 0;
+      const approvedMs = (w.approvedAt || w.sponsoredAt)?.toMillis?.() ?? 0;
       let createdMs = 0;
       if (w.createdAt) {
         if (typeof (w.createdAt as any).toMillis === 'function') {
@@ -611,7 +642,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         }
       }
       const sweepMs = latestSweepsMap[w.id.toLowerCase()]?.sweptAtMs ?? 0;
-      return Math.max(sponsoredMs, createdMs, sweepMs);
+      return Math.max(approvedMs, createdMs, sweepMs);
     };
 
     return [...list].sort((a, b) => {

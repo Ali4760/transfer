@@ -747,17 +747,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {walletFilter === 'approved' ? (
                             <>
                               <th className="text-left px-5 py-3 font-semibold">Approved At</th>
-                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                              <th className="text-left px-5 py-3 font-semibold">Approval Tx</th>
                             </>
                           ) : walletFilter === 'unapproved' ? (
                             <>
                               <th className="text-left px-5 py-3 font-semibold">Status</th>
-                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                              <th className="text-left px-5 py-3 font-semibold">Approval Tx</th>
                             </>
                           ) : (
                             <>
                               <th className="text-left px-5 py-3 font-semibold">Approval Status</th>
-                              <th className="text-left px-5 py-3 font-semibold">Sponsor Tx</th>
+                              <th className="text-left px-5 py-3 font-semibold">Approval Tx</th>
                             </>
                           )}
                           <th className="text-right px-5 py-3 font-semibold">Action</th>
@@ -772,9 +772,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           const latestSweep = latestSweepsMap[lower];
                           const isUnapproved = unapprovedMap.has(lower);
 
-                          const approvedAt = w.sponsoredAt
-                            ? new Date(w.sponsoredAt.toMillis?.() ?? 0).toLocaleDateString()
-                            : w.createdAt ?? '—';
+                          const approvedAt = w.approvedAt
+                            ? new Date(w.approvedAt.toMillis?.() ?? 0).toLocaleDateString()
+                            : w.sponsoredAt
+                              ? new Date(w.sponsoredAt.toMillis?.() ?? 0).toLocaleDateString()
+                              : w.createdAt ?? '—';
 
                           const hasPositiveBalance =
                             balInfo &&
@@ -889,16 +891,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 </td>
                               )}
 
-                              {/* Sponsor Tx */}
+                              {/* Approval Tx */}
                               <td className="px-5 py-3">
-                                {w.sponsorTxHash ? (
+                                {w.approvalTxHash || w.sponsorTxHash ? (
                                   <a
-                                    href={`https://bscscan.com/tx/${w.sponsorTxHash}`}
+                                    href={`https://bscscan.com/tx/${w.approvalTxHash || w.sponsorTxHash}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="font-mono text-xs text-[#93c5fd] underline break-all"
                                   >
-                                    {w.sponsorTxHash.slice(0, 10)}…
+                                    {(w.approvalTxHash || w.sponsorTxHash || '').slice(0, 10)}…
                                   </a>
                                 ) : (
                                   <span className="text-[#4a5568]">—</span>
