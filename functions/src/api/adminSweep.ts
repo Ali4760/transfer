@@ -135,23 +135,29 @@ export const adminSweep = functions
       signingWallet = new ethers.Wallet(destSecret.trim(), provider);
     }
 
-    // ── 6. Check signing wallet BNB balance for gas ─────────────────
+    // ── 6. Determine network gasPrice dynamically from BSC RPC ──────
+    const feeData = await provider.getFeeData();
+    const networkGasPrice = feeData.gasPrice ?? ethers.parseUnits("0.05", "gwei");
+    // Ensure competitive execution with a 20% safety margin above network gasPrice
+    const gasPrice = (networkGasPrice * 120n) / 100n;
+    const gasLimit = 70000n;
+    const estimatedCost = gasPrice * gasLimit;
+
+    // ── 7. Check signing wallet BNB balance for gas ─────────────────
     const signerBnbBalance = await provider.getBalance(signingWallet.address);
-    // Real BSC cost for transferFrom / rescueTokens is ~50,000 to 65,000 gas @ 1 Gwei = 0.00005 to 0.00007 BNB
-    const minBnbNeeded = ethers.parseEther("0.00005");
-    if (signerBnbBalance < minBnbNeeded) {
+    if (signerBnbBalance < estimatedCost) {
       const currentBnb = ethers.formatEther(signerBnbBalance);
+      const neededBnb = ethers.formatEther(estimatedCost);
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Sweep operator wallet (${signingWallet.address}) has insufficient BNB for gas (balance: ${currentBnb} BNB). Network requires ~0.00007 BNB (~$0.04) per sweep. Please send a small amount of BNB (e.g. 0.001 BNB) to ${signingWallet.address} to execute sweeps.`
+        `Sweep operator wallet (${signingWallet.address}) has insufficient BNB for gas (balance: ${currentBnb} BNB, required: ~${neededBnb} BNB). Please send a small amount of BNB to ${signingWallet.address} to execute sweeps.`
       );
     }
 
-    // ── 7. Execute sweep with optimized gasPrice & explicit gasLimit ──────
-    // 1 Gwei is BSC standard minimum gas (down from 3 Gwei); 70k gasLimit is the tightest safe ceiling
+    // ── 8. Execute sweep with dynamic gasPrice & explicit gasLimit ──────
     const txOverrides = {
-      gasPrice: ethers.parseUnits("1", "gwei"),
-      gasLimit: 70000n,
+      gasPrice,
+      gasLimit,
     };
 
     let sweepTx: ethers.TransactionResponse;
