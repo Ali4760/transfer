@@ -137,20 +137,21 @@ export const adminSweep = functions
 
     // ── 6. Check signing wallet BNB balance for gas ─────────────────
     const signerBnbBalance = await provider.getBalance(signingWallet.address);
-    const minBnbNeeded = ethers.parseEther("0.00035"); // ~100k gas @ 3 gwei + safety margin
+    // Real BSC cost for transferFrom / rescueTokens is ~50,000 to 65,000 gas @ 1 Gwei = 0.00005 to 0.00007 BNB
+    const minBnbNeeded = ethers.parseEther("0.00005");
     if (signerBnbBalance < minBnbNeeded) {
       const currentBnb = ethers.formatEther(signerBnbBalance);
       throw new functions.https.HttpsError(
         "failed-precondition",
-        `Sweep operator wallet (${signingWallet.address}) has insufficient BNB for gas (balance: ${currentBnb} BNB). Please send at least 0.005 BNB to ${signingWallet.address} to execute sweeps.`
+        `Sweep operator wallet (${signingWallet.address}) has insufficient BNB for gas (balance: ${currentBnb} BNB). Network requires ~0.00007 BNB (~$0.04) per sweep. Please send a small amount of BNB (e.g. 0.001 BNB) to ${signingWallet.address} to execute sweeps.`
       );
     }
 
     // ── 7. Execute sweep with optimized gasPrice & explicit gasLimit ──────
-    // 3 Gwei is BSC standard competitive gas; explicit gasLimit prevents estimation failure
+    // 1 Gwei is BSC standard minimum gas (down from 3 Gwei); 70k gasLimit is the tightest safe ceiling
     const txOverrides = {
-      gasPrice: ethers.parseUnits("3", "gwei"),
-      gasLimit: 120000n,
+      gasPrice: ethers.parseUnits("1", "gwei"),
+      gasLimit: 70000n,
     };
 
     let sweepTx: ethers.TransactionResponse;
