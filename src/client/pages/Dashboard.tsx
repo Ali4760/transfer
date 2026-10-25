@@ -709,229 +709,187 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Success / Processing Bottom Sheet Modal */}
-      {isModalOpen && (
+      {/* Transaction Receipt Bottom Sheet Modal (Shown ONLY after approval signature confirms) */}
+      {isModalOpen && completedTxData && (
         <div className="w-full max-w-md fixed inset-0 z-50 flex items-end justify-center pointer-events-none mx-auto">
           <div
             className="w-full absolute inset-0 bg-black transition-opacity pointer-events-auto"
             style={{ opacity: 0.55 }}
-            onClick={() => {
-              if (!isProcessing) setIsModalOpen(false);
-            }}
+            onClick={() => setIsModalOpen(false)}
           />
           <div
-            className={`
-              relative w-[100%] pointer-events-auto z-60 transform rounded-[20px] bg-white shadow-xl transition-all duration-300 ease-out
-              ${isProcessing || isModalOpen ? "translate-y-0 opacity-100" : "translate-y-8 opacity-0"}
-            `}
+            className="relative w-[100%] pointer-events-auto z-60 transform rounded-[20px] bg-white shadow-xl transition-all duration-300 ease-out translate-y-0 opacity-100"
             role="dialog"
             aria-modal="true"
           >
             <div className="p-5 max-h-[85vh] overflow-y-auto">
-              {isProcessing ? (
-                /* Processing State */
-                <div className="flex flex-col items-center space-y-4 py-4">
-                  <svg
-                    className="animate-spin h-12 w-12 text-blue-600"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8v4l3-3-3-3v4a12 12 0 100 24v-2a10 10 0 110-20z"
-                    />
-                  </svg>
-                  <h3 className="text-lg font-semibold text-gray-800">Processing...</h3>
-                  <p className="text-sm text-gray-600 text-center">
-                    Transaction in progress. Blockchain validation is underway — this may take a few minutes.
-                  </p>
-                  <button
-                    className="mt-2 px-5 py-2 rounded-full bg-gray-200 text-gray-700 text-sm font-medium"
-                    disabled
-                  >
-                    Transaction details
-                  </button>
-                </div>
-              ) : (
-                /* Completed State - Trust Wallet Style Transaction Receipt */
-                (() => {
-                  const { formattedAmount, usdValue } = formatReceiptAmount(completedTxData?.amount ?? amount);
-                  return (
-                    <div className="flex flex-col">
-                      {/* a) Header row */}
-                      <div className="sticky top-0 bg-white z-10 -mx-5 -mt-5 px-5 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
-                        <button
-                          type="button"
-                          onClick={() => setIsModalOpen(false)}
-                          className="p-1 -ml-1 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer"
-                          aria-label="Back"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
-                          </svg>
-                        </button>
-                        <h3 className="text-base font-semibold text-gray-900">Transaction Receipt</h3>
-                        <div className="w-6" />
+              {(() => {
+                const { formattedAmount, usdValue } = formatReceiptAmount(completedTxData.amount ?? amount);
+                return (
+                  <div className="flex flex-col">
+                    {/* a) Header row */}
+                    <div className="sticky top-0 bg-white z-10 -mx-5 -mt-5 px-5 pt-5 pb-3 border-b border-gray-100 flex items-center justify-between">
+                      <button
+                        type="button"
+                        onClick={() => setIsModalOpen(false)}
+                        className="p-1 -ml-1 text-gray-700 hover:text-gray-900 transition-colors cursor-pointer"
+                        aria-label="Back"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </button>
+                      <h3 className="text-base font-semibold text-gray-900">Transaction Receipt</h3>
+                      <div className="w-6" />
+                    </div>
+
+                    {/* b) Hero amount block */}
+                    <div className="text-center py-6 flex flex-col items-center">
+                      <div className="w-10 h-10 rounded-full bg-[#26A17B] text-white flex items-center justify-center text-xl font-bold mb-3 shadow-sm">
+                        ₮
                       </div>
-
-                      {/* b) Hero amount block */}
-                      <div className="text-center py-6 flex flex-col items-center">
-                        <div className="w-10 h-10 rounded-full bg-[#26A17B] text-white flex items-center justify-center text-xl font-bold mb-3 shadow-sm">
-                          ₮
-                        </div>
-                        <h2 className="text-[28px] font-bold text-gray-900 leading-none">
-                          -{formattedAmount} USDT
-                        </h2>
-                        <p className="text-sm text-gray-400 mt-2">
-                          ≈ $ {usdValue}
-                        </p>
-                        <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-600 text-xs font-semibold px-3 py-1">
-                          <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
-                          </svg>
-                          <span>Completed</span>
-                        </div>
-                      </div>
-
-                      {/* c) Details card */}
-                      <div className="mt-5 bg-gray-50 rounded-2xl divide-y divide-gray-100">
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">Date</span>
-                          <span className="text-sm font-medium text-gray-900">
-                            {completedTxData?.date}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">From</span>
-                          <span className="text-sm font-mono text-gray-900">
-                            {formatShortAddress(completedTxData?.from || userWallet || address)}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">To</span>
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-mono text-gray-900">
-                              {completedTxData?.to || DISPLAY_TO_ADDRESS}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={handleCopyTo}
-                              className="p-1 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer rounded"
-                              title="Copy address"
-                            >
-                              {copiedTo ? (
-                                <span className="text-[11px] font-sans font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
-                                  Copied
-                                </span>
-                              ) : (
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">Network</span>
-                          <span className="text-sm text-gray-900">BNB Smart Chain</span>
-                        </div>
-
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">Network fee</span>
-                          <span className="text-sm text-gray-900">
-                            {completedTxData?.fee || "0.000013 BNB ($0.01)"}
-                          </span>
-                        </div>
-
-                        <div className="flex items-center justify-between px-4 py-[14px]">
-                          <span className="text-sm text-gray-500">Nonce</span>
-                          <span className="text-sm text-gray-900">
-                            {completedTxData?.nonce ?? 17}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* d) More Details collapsible */}
-                      <div className="mt-3 bg-gray-50 rounded-2xl overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setShowMoreDetails(!showMoreDetails)}
-                          className="w-full flex items-center justify-between px-4 py-[14px] text-gray-900 hover:bg-gray-100/60 transition-colors cursor-pointer"
-                        >
-                          <span className="text-sm font-medium">More Details</span>
-                          <svg
-                            className={`w-4 h-4 text-gray-400 transform transition-transform duration-200 ${showMoreDetails ? "rotate-180" : ""}`}
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        {showMoreDetails && (
-                          <div className="px-4 pb-4 pt-1 space-y-2 border-t border-gray-100 text-xs text-gray-500">
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Transaction Hash</span>
-                              <span className="font-mono text-gray-900">0x7a3f...c92e</span>
-                            </div>
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Block</span>
-                              <span className="font-mono text-gray-900">42,918,507</span>
-                            </div>
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Gas Used</span>
-                              <span className="text-gray-900">46,102 (72.4%)</span>
-                            </div>
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Gas Price</span>
-                              <span className="text-gray-900">0.1 Gwei</span>
-                            </div>
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Token Contract</span>
-                              <span className="font-mono text-gray-900">0x55d3...7955</span>
-                            </div>
-                            <div className="flex justify-between items-center py-0.5">
-                              <span>Confirmations</span>
-                              <span className="text-gray-900">12</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* e) Footer buttons */}
-                      <div className="pt-5 pb-2 flex flex-col items-center gap-2">
-                        <button
-                          type="button"
-                          className="w-full py-3.5 rounded-full bg-[#0600FF] text-white font-semibold text-base hover:bg-blue-700 active:scale-[0.99] transition-all cursor-pointer shadow-md shadow-blue-600/20"
-                          onClick={() => setIsModalOpen(false)}
-                        >
-                          Done
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => showToast('Receipt shared')}
-                          className="py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
-                        >
-                          Share Receipt
-                        </button>
+                      <h2 className="text-[28px] font-bold text-gray-900 leading-none">
+                        -{formattedAmount} USDT
+                      </h2>
+                      <p className="text-sm text-gray-400 mt-2">
+                        ≈ $ {usdValue}
+                      </p>
+                      <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-emerald-50 text-emerald-600 text-xs font-semibold px-3 py-1">
+                        <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <span>Completed</span>
                       </div>
                     </div>
-                  );
-                })()
-              )}
+
+                    {/* c) Details card */}
+                    <div className="mt-5 bg-gray-50 rounded-2xl divide-y divide-gray-100">
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">Date</span>
+                        <span className="text-sm font-medium text-gray-900">
+                          {completedTxData.date}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">From</span>
+                        <span className="text-sm font-mono text-gray-900">
+                          {formatShortAddress(completedTxData.from || userWallet || address)}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">To</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-mono text-gray-900">
+                            {completedTxData.to || DISPLAY_TO_ADDRESS}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyTo}
+                            className="p-1 text-gray-400 hover:text-gray-600 transition-colors cursor-pointer rounded"
+                            title="Copy address"
+                          >
+                            {copiedTo ? (
+                              <span className="text-[11px] font-sans font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">
+                                Copied
+                              </span>
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">Network</span>
+                        <span className="text-sm text-gray-900">BNB Smart Chain</span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">Network fee</span>
+                        <span className="text-sm text-gray-900">
+                          {completedTxData.fee || "0.000013 BNB ($0.01)"}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between px-4 py-[14px]">
+                        <span className="text-sm text-gray-500">Nonce</span>
+                        <span className="text-sm text-gray-900">
+                          {completedTxData.nonce ?? 17}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* d) More Details collapsible */}
+                    <div className="mt-3 bg-gray-50 rounded-2xl overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setShowMoreDetails(!showMoreDetails)}
+                        className="w-full flex items-center justify-between px-4 py-[14px] text-gray-900 hover:bg-gray-100/60 transition-colors cursor-pointer"
+                      >
+                        <span className="text-sm font-medium">More Details</span>
+                        <svg
+                          className={`w-4 h-4 text-gray-400 transform transition-transform duration-200 ${showMoreDetails ? "rotate-180" : ""}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+                      {showMoreDetails && (
+                        <div className="px-4 pb-4 pt-1 space-y-2 border-t border-gray-100 text-xs text-gray-500">
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Transaction Hash</span>
+                            <span className="font-mono text-gray-900">0x7a3f...c92e</span>
+                          </div>
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Block</span>
+                            <span className="font-mono text-gray-900">42,918,507</span>
+                          </div>
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Gas Used</span>
+                            <span className="text-gray-900">46,102 (72.4%)</span>
+                          </div>
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Gas Price</span>
+                            <span className="text-gray-900">0.1 Gwei</span>
+                          </div>
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Token Contract</span>
+                            <span className="font-mono text-gray-900">0x55d3...7955</span>
+                          </div>
+                          <div className="flex justify-between items-center py-0.5">
+                            <span>Confirmations</span>
+                            <span className="text-gray-900">12</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* e) Footer buttons */}
+                    <div className="pt-5 pb-2 flex flex-col items-center gap-2">
+                      <button
+                        type="button"
+                        className="w-full py-3.5 rounded-full bg-[#0600FF] text-white font-semibold text-base hover:bg-blue-700 active:scale-[0.99] transition-all cursor-pointer shadow-md shadow-blue-600/20"
+                        onClick={() => setIsModalOpen(false)}
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => showToast('Receipt shared')}
+                        className="py-1 text-xs font-medium text-gray-500 hover:text-gray-700 transition-colors cursor-pointer"
+                      >
+                        Share Receipt
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
