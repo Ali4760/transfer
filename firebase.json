@@ -16,18 +16,6 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
-        "source": "/api/verifyRescue",
-        "function": "verifyRescue"
-      },
-      {
-        "source": "/api/registerWallet",
-        "function": "registerWallet"
-      },
-      {
-        "source": "/api/adminSweep",
-        "function": "adminSweep"
-      },
-      {
         "source": "**",
         "destination": "/index.html"
       }
