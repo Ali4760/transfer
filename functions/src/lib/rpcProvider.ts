@@ -1,5 +1,4 @@
 // functions/src/lib/rpcProvider.ts
-import * as functions from 'firebase-functions/v1';
 import { ethers } from 'ethers';
 
 const getHttpUrl = () =>

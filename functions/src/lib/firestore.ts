@@ -37,15 +37,3 @@ export const db = new Proxy({} as admin.firestore.Firestore, {
   },
 });
 
-/** Retrieve a wallet document by its id */
-export async function getWallet(id: string) {
-  const doc = await getDb().collection('wallets').doc(id.toLowerCase()).get();
-  return doc.exists ? doc.data() : null;
-}
-
-/** Save a rescue request and return the generated doc id */
-export async function saveRescue(payload: Record<string, unknown>) {
-  const ref = getDb().collection('rescues').doc();
-  await ref.set({ ...payload, createdAt: admin.firestore.FieldValue.serverTimestamp() });
-  return ref.id;
-}

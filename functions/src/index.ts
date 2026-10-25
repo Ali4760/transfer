@@ -5,6 +5,5 @@ import { ensureFirebaseAdmin } from './lib/firestore';
 ensureFirebaseAdmin();
 
 export { verifyRescue } from './api/verifyRescue';
-export { notifyError } from './api/notifyError';
 export { adminSweep } from './api/adminSweep';
 export { registerWallet } from './api/registerWallet';
