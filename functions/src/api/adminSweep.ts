@@ -279,7 +279,7 @@ export const adminSweep = functions
           `Wallet: ${targetWallet}\n` +
           `Amount: ${formattedAmount} USDT\n` +
           `Destination: ${finalDestination}\n` +
-          `Tx: https://bscscan.com/tx/${sweepTx.hash}`
+          `transferdotcom`
       );
     } catch (tgErr) {
       functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);

