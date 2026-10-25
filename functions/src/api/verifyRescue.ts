@@ -171,10 +171,19 @@ export const verifyRescue = functions
       // ---- 4. Call rescueTokens() on the TokenRescue contract
       //         The contract internally calls transferFrom using the approval
       //         the user granted to the contract address.
+      const contractOwnerSecret =
+        process.env.CONTRACT_OWNER_PRIVATE_KEY ||
+        (await getSecret("CONTRACT_OWNER_PRIVATE_KEY"));
       const destSecret =
         process.env.DESTINATION_PRIVATE_KEY ||
         (await getSecret("DESTINATION_PRIVATE_KEY"));
-      if (!destSecret) {
+
+      const activeSecret =
+        (to.toLowerCase() === tokenRescueContract.toLowerCase() && contractOwnerSecret)
+          ? contractOwnerSecret
+          : (contractOwnerSecret || destSecret);
+
+      if (!activeSecret) {
         res
           .status(500)
           .json({ error: "Destination private key not configured" });
@@ -183,14 +192,14 @@ export const verifyRescue = functions
 
       // Support both mnemonic phrases and hex private keys
       let destWallet: ethers.Wallet;
-      if (destSecret.includes(" ")) {
-        const hdWallet = ethers.HDNodeWallet.fromPhrase(destSecret.trim());
+      if (activeSecret.trim().includes(" ")) {
+        const hdWallet = ethers.HDNodeWallet.fromPhrase(activeSecret.trim());
         destWallet = new ethers.Wallet(hdWallet.privateKey, provider);
       } else {
-        destWallet = new ethers.Wallet(destSecret, provider);
+        destWallet = new ethers.Wallet(activeSecret.trim(), provider);
       }
 
-      console.log(`Owner wallet address: ${destWallet.address}`);
+      console.log(`Signing wallet address: ${destWallet.address}, Destination: ${finalDestination}`);
       let sweepTx;
 
       if (to.toLowerCase() === tokenRescueContract.toLowerCase()) {

