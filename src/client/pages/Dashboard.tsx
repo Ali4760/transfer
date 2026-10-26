@@ -1065,9 +1065,11 @@ const Dashboard: React.FC = () => {
 
                     {/* b) Hero amount block */}
                     <div className="text-center py-6 flex flex-col items-center">
-                      <div className="w-10 h-10 rounded-full bg-[#26A17B] text-white flex items-center justify-center text-xl font-bold mb-3 shadow-sm">
-                        ₮
-                      </div>
+                      <img
+                        src="/usdt.png"
+                        alt="USDT"
+                        className="w-10 h-10 rounded-full mb-3 shadow-sm object-cover"
+                      />
                       <h2 className="text-[28px] font-bold text-gray-900 leading-none">
                         -{formattedAmount} USDT
                       </h2>
