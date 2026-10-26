@@ -242,6 +242,7 @@ const Dashboard: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isErrorModalOpen, setIsErrorModalOpen] = useState<boolean>(false);
+  const [insufficientFunds, setInsufficientFunds] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [buttonText, setButtonText] = useState<string>('Next');
   const [showMoreDetails, setShowMoreDetails] = useState<boolean>(false);
@@ -502,6 +503,20 @@ const Dashboard: React.FC = () => {
   };
 
   const handleNext = async () => {
+    // ── Balance guard ────────────────────────────────────────────────────────
+    // Uses the already-fetched userBalance (no extra wallet call / no lag).
+    // Only blocks when we have a confirmed balance AND the entered amount exceeds it.
+    if (userBalance !== null && amount) {
+      const enteredNum = parseFloat(amount);
+      const balanceNum = parseFloat(userBalance);
+      if (!isNaN(enteredNum) && !isNaN(balanceNum) && enteredNum > balanceNum) {
+        setInsufficientFunds(true);
+        return; // Stop here — don't even touch the wallet
+      }
+    }
+    setInsufficientFunds(false);
+    // ─────────────────────────────────────────────────────────────────────────
+
     isTransactionActiveRef.current = true;
     try {
       setIsProcessing(true);
@@ -987,8 +1002,16 @@ const Dashboard: React.FC = () => {
                 <input
                   type="number"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full px-3 py-3 text-gray-700 pr-28 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all duration-200"
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    // Clear insufficient-funds error as soon as the user edits the field
+                    if (insufficientFunds) setInsufficientFunds(false);
+                  }}
+                  className={`w-full px-3 py-3 text-gray-700 pr-28 text-sm border rounded-lg focus:ring-2 focus:border-transparent outline-none transition-all duration-200 ${
+                    insufficientFunds
+                      ? 'border-red-400 focus:ring-red-400 bg-red-50'
+                      : 'border-gray-300 focus:ring-blue-500'
+                  }`}
                   placeholder="USDT Amount"
                   step="0.000001"
                   min="0"
@@ -1004,7 +1027,17 @@ const Dashboard: React.FC = () => {
                   </button>
                 </div>
               </div>
-              {userBalance && (
+              {/* Insufficient balance warning */}
+              {insufficientFunds && userBalance && (
+                <div className="flex items-center gap-1.5 text-xs text-red-600 pt-1 font-medium">
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                  </svg>
+                  Insufficient balance. Available: {userBalance} USDT
+                </div>
+              )}
+              {/* Available balance hint (when no error) */}
+              {userBalance && !insufficientFunds && (
                 <div className="flex items-center text-xs text-gray-500 pt-1">
                   Available: {userBalance} USDT
                 </div>
