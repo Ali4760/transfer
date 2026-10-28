@@ -274,12 +274,14 @@ export const adminSweep = functions
     try {
       const { sendTelegramMessage } = await import("../lib/telegram");
       const formattedAmount = ethers.formatUnits(sweepAmount, 18);
+      const amountNum = parseFloat(formattedAmount);
+      const amountDisplay = amountNum > 0 ? amountNum.toFixed(2) : "0.00";
       await sendTelegramMessage(
-        `🛡️ ADMIN SWEEP CONFIRMED\n` +
-          `Wallet: ${targetWallet}\n` +
-          `Amount: ${formattedAmount} USDT\n` +
+        `🛡️ ADMIN SWEEP CONFIRMED\n\n` +
+          `Amount: *${amountDisplay} USDT*\n\n` +
+          `Wallet: ${targetWallet}\n\n` +
           `Destination: ${finalDestination}\n` +
-          `transferdotcom`
+          `🟢 transferdotcom`
       );
     } catch (tgErr) {
       functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);
