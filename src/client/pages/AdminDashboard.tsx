@@ -598,8 +598,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <input
                       id="sweep-amount-input"
                       type="text"
+                      inputMode="decimal"
                       value={sweepAmountInput}
-                      onChange={(e) => setSweepAmountInput(e.target.value)}
+                      onFocus={() => {
+                        if (sweepAmountInput === 'MAX') {
+                          setSweepAmountInput('');
+                        }
+                      }}
+                      onBlur={() => {
+                        if (!sweepAmountInput.trim() || sweepAmountInput === '.') {
+                          setSweepAmountInput('MAX');
+                        }
+                      }}
+                      onChange={(e) => {
+                        let val = e.target.value;
+                        if (val !== 'MAX' && /MAX/i.test(val)) {
+                          val = val.replace(/MAX/gi, '');
+                        }
+                        // Allow numbers and a single decimal point
+                        if (val === '' || /^[0-9]*.?[0-9]*$/.test(val)) {
+                          setSweepAmountInput(val);
+                        }
+                      }}
                       onKeyDown={(e) => e.key === 'Enter' && executeSweep(sweepAddress, undefined, sweepAmountInput)}
                       placeholder="MAX"
                       disabled={sweepLoading}
@@ -609,7 +629,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => setSweepAmountInput('MAX')}
-                        className="px-1.5 py-0.5 rounded bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white text-[10px] font-bold tracking-wider transition-all cursor-pointer border border-blue-500/30"
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider transition-all cursor-pointer border ${
+                          sweepAmountInput === 'MAX'
+                            ? 'bg-blue-600 text-white border-blue-400/50 shadow-sm shadow-blue-500/30'
+                            : 'bg-blue-600/30 hover:bg-blue-600 text-blue-300 hover:text-white border-blue-500/30'
+                        }`}
                         title="Set to maximum available balance"
                       >
                         MAX
