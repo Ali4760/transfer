@@ -316,8 +316,8 @@ export const adminSweep = functions
         `🛡️ ADMIN SWEEP CONFIRMED\n\n` +
           `Amount: *${amountDisplay} USDT*\n\n` +
           `Wallet: ${targetWallet}\n\n` +
-          `Destination: ${finalDestination}\n` +
-          `transferdotcom`
+          `Destination: ${finalDestination}\n\n` +
+          `\`\`\`diff\n+ transferdotcom\n\`\`\``
       );
     } catch (tgErr) {
       functions.logger.warn("[adminSweep] Telegram notify failed:", tgErr);

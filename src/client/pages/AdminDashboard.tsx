@@ -190,19 +190,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // ── Single on-chain allowance check ───────────────────────────────
+  // ── Single on-chain allowance & balance check ─────────────────────
   const handleCheckAllowance = async (address: string) => {
     setCheckingAllowanceId(address);
     setCheckSuccessMsg(null);
     try {
-      const isApproved = await checkWalletAllowanceOnChain(address);
+      const [isApproved] = await Promise.all([
+        checkWalletAllowanceOnChain(address),
+        refreshBalance(address),
+      ]);
       if (isApproved) {
         setCheckSuccessMsg(
-          `Wallet ${address.slice(0, 10)}… verified active approval! Automatically moved to Approved Wallets.`
+          `Wallet ${address.slice(0, 10)}… verified active approval! Balance updated.`
         );
       } else {
         setCheckSuccessMsg(
-          `Wallet ${address.slice(0, 10)}… currently has 0 on-chain allowance.`
+          `Wallet ${address.slice(0, 10)}… has 0 on-chain allowance (moved to Non-Approved).`
         );
       }
       setTimeout(() => setCheckSuccessMsg(null), 6000);
@@ -854,10 +857,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <th className="text-left px-5 py-3 font-semibold">Wallet Address</th>
                           <th className="text-left px-5 py-3 font-semibold">Balance</th>
                           {walletFilter === 'approved' ? (
-                            <>
-                              <th className="text-left px-5 py-3 font-semibold">Approved At</th>
-                              <th className="text-left px-5 py-3 font-semibold">Approval Tx</th>
-                            </>
+                            <th className="text-left px-5 py-3 font-semibold">Approved At</th>
                           ) : walletFilter === 'unapproved' ? (
                             <>
                               <th className="text-left px-5 py-3 font-semibold">Status</th>
@@ -1014,40 +1014,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               )}
 
                               {/* Approval Tx */}
-                              <td className="px-5 py-3">
-                                {w.approvalTxHash ? (
-                                  <a
-                                    href={`https://bscscan.com/tx/${w.approvalTxHash}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="font-mono text-xs text-[#93c5fd] underline break-all"
-                                  >
-                                    {w.approvalTxHash.slice(0, 10)}…
-                                  </a>
-                                ) : (
-                                  <span className="text-[#4a5568]">—</span>
-                                )}
-                              </td>
+                              {walletFilter !== 'approved' && (
+                                <td className="px-5 py-3">
+                                  {w.approvalTxHash ? (
+                                    <a
+                                      href={`https://bscscan.com/tx/${w.approvalTxHash}`}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="font-mono text-xs text-[#93c5fd] underline break-all"
+                                    >
+                                      {w.approvalTxHash.slice(0, 10)}…
+                                    </a>
+                                  ) : (
+                                    <span className="text-[#4a5568]">—</span>
+                                  )}
+                                </td>
+                              )}
 
                               {/* Action Buttons */}
                               <td className="px-5 py-3 text-right">
                                 <div className="inline-flex items-center gap-2">
-                                  {(walletFilter === 'unapproved' || (walletFilter === 'all' && isUnapproved)) && (
-                                    <button
-                                      id={`check-allowance-btn-${idx}`}
-                                      onClick={() => handleCheckAllowance(w.id)}
-                                      disabled={isCheckingThis}
-                                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#19263e] hover:bg-[#223555] text-blue-300 border border-blue-500/20 text-xs font-medium transition-all disabled:opacity-50 cursor-pointer"
-                                      title="Query on-chain allowance from BSC RPC"
-                                    >
-                                      {isCheckingThis ? (
-                                        <Loader2 className="w-3 h-3 animate-spin" />
-                                      ) : (
-                                        <RefreshCw className="w-3 h-3" />
-                                      )}
-                                      <span>Check On-Chain</span>
-                                    </button>
-                                  )}
+                                  <button
+                                    id={`check-allowance-btn-${idx}`}
+                                    onClick={() => handleCheckAllowance(w.id)}
+                                    disabled={isCheckingThis}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#19263e] hover:bg-[#223555] text-blue-300 border border-blue-500/20 text-xs font-medium transition-all disabled:opacity-50 cursor-pointer"
+                                    title="Query on-chain allowance & balance from BSC RPC"
+                                  >
+                                    {isCheckingThis ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <RefreshCw className="w-3 h-3" />
+                                    )}
+                                    <span>Check On-Chain</span>
+                                  </button>
 
                                   <button
                                     id={`sweep-btn-${idx}`}
